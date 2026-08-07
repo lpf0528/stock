@@ -1,0 +1,51 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Debug Web Service (Web控制台)",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/instock/web/web_service.py",
+            "console": "integratedTerminal",
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}",
+                "db_host": "localhost",
+                "db_port": "3306",
+                "db_user": "root",
+                "db_password": "root",
+                "db_database": "instockdb"
+            }
+        },
+        {
+            "name": "Debug Daily Job (每日计算与选股作业)",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/instock/job/execute_daily_job.py",
+            "console": "integratedTerminal",
+            "args": [],
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}",
+                "db_host": "localhost",
+                "db_port": "3306",
+                "db_user": "root",
+                "db_password": "root",
+                "db_database": "instockdb"
+            }
+        },
+        {
+            "name": "Debug Init Database (初始化数据库)",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/instock/job/init_job.py",
+            "console": "integratedTerminal",
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}",
+                "db_host": "localhost",
+                "db_port": "3306",
+                "db_user": "root",
+                "db_password": "root",
+                "db_database": "instockdb"
+            }
+        }
+    ]
+}

@@ -18,7 +18,43 @@ db_database = "instockdb"  # 数据库名称
 db_port = 3306  # 数据库服务端口
 db_charset = "utf8mb4"  # 数据库字符集
 
-# 使用环境变量获得数据库,docker -e 传递
+import json
+
+# 1. 尝试读取配置文件 instock/config/database.json
+_config_file = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'config', 'database.json')
+if os.path.exists(_config_file):
+    try:
+        with open(_config_file, 'r', encoding='utf-8') as _f:
+            _db_cfg = json.load(_f)
+            db_host = _db_cfg.get('db_host', db_host)
+            db_user = _db_cfg.get('db_user', db_user)
+            db_password = _db_cfg.get('db_password', db_password)
+            db_database = _db_cfg.get('db_database', db_database)
+            db_port = int(_db_cfg.get('db_port', db_port))
+            db_charset = _db_cfg.get('db_charset', db_charset)
+    except Exception as _e:
+        logging.warning(f"读取数据库配置文件 {_config_file} 失败: {_e}")
+
+# 2. 尝试读取根目录 .env 配置文件
+_env_file = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), '.env')
+if os.path.exists(_env_file):
+    try:
+        with open(_env_file, 'r', encoding='utf-8') as _f:
+            for _line in _f:
+                _line = _line.strip()
+                if _line and not _line.startswith('#') and '=' in _line:
+                    _k, _v = _line.split('=', 1)
+                    _k, _v = _k.strip(), _v.strip().strip("'\"")
+                    if _k == 'db_host': db_host = _v
+                    elif _k == 'db_user': db_user = _v
+                    elif _k == 'db_password': db_password = _v
+                    elif _k == 'db_database': db_database = _v
+                    elif _k == 'db_port': db_port = int(_v)
+                    elif _k == 'db_charset': db_charset = _v
+    except Exception as _e:
+        pass
+
+# 3. 使用环境变量获得数据库,docker -e 传递 (优先级最高)
 _db_host = os.environ.get('db_host')
 if _db_host is not None:
     db_host = _db_host
