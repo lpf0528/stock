@@ -137,17 +137,17 @@ def save_nph_stock_sector_fund_flow_data(date, before=True):
     if before:
         return
 
-    # times = tuple(range(2))
-    # with concurrent.futures.ThreadPoolExecutor(max_workers=len(times)) as executor:
-    #     {executor.submit(stock_sector_fund_flow_data, date, k): k for k in times}
     stock_sector_fund_flow_data(date, 0)
     stock_sector_fund_flow_data(date, 1)
 
 def stock_sector_fund_flow_data(date, index_sector):
+    sector_label = "行业资金流向 (cn_stock_fund_flow_industry)" if index_sector == 0 else "概念资金流向 (cn_stock_fund_flow_concept)"
+    logging.info(f"📊 开始抓取并处理 {sector_label} (日期: {date})...")
     try:
         times = tuple(range(3))
         results = run_check_stock_sector_fund_flow(index_sector, times)
         if results is None:
+            logging.warning(f"⚠️ 未获取到 {sector_label} 数据")
             return
 
         for t in times:
@@ -159,6 +159,7 @@ def stock_sector_fund_flow_data(date, index_sector):
                     data = pd.merge(data, r, on=['name'], how='left')
 
         if data is None or len(data.index) == 0:
+            logging.warning(f"⚠️ {sector_label} 数据为空")
             return
 
         data.insert(0, 'date', date.strftime("%Y-%m-%d"))
@@ -177,6 +178,7 @@ def stock_sector_fund_flow_data(date, index_sector):
             cols_type = tbs.get_field_types(tbs_table['columns'])
 
         mdb.insert_db_from_df(data, table_name, cols_type, False, "`date`,`name`")
+        logging.info(f"✅ 成功保存 {sector_label} -> 数据量: {len(data.index)} 条，表名: `{table_name}`")
     except Exception as e:
         logging.error(f"basic_data_other_daily_job.stock_sector_fund_flow_data处理异常：{e}")
 

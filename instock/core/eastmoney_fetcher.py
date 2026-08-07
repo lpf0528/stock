@@ -55,7 +55,7 @@ class eastmoney_fetcher:
 
         # 配置连接池
         retry_strategy = Retry(
-            total=3,
+            total=1,
             backoff_factor=0.1,
             status_forcelist=[429, 500, 502, 503, 504],
             allowed_methods=["HEAD", "GET", "POST", "OPTIONS"]
@@ -77,13 +77,26 @@ class eastmoney_fetcher:
             'Referer': 'https://quote.eastmoney.com/',
             'Accept': '*/*',
             'Accept-Language': 'zh-CN,zh;q=0.9',
-            'Accept-Encoding': 'gzip, deflate, br, zstd',
+            'Accept-Encoding': 'gzip, deflate',
             'Connection': 'keep-alive',
         }
         if cookie_str:
             headers['Cookie'] = cookie_str
         session.headers.update(headers)
         return session
+
+    def _get_real_ip(self, host):
+        """HTTP DNS 自动解析真实 IP (绕过 Clash TUN Fake-IP)"""
+        try:
+            r = requests.get(f'https://dns.alidns.com/resolve?name={host}&type=A', proxies={'http': None, 'https': None}, timeout=3)
+            for item in r.json().get('Answer', []):
+                if item.get('type') == 1:
+                    ip = item.get('data')
+                    if ip and not ip.startswith('198.18.') and not ip.endswith('.'):
+                        return ip
+        except Exception:
+            pass
+        return '47.112.165.11'
 
     def make_request(self, url, params=None, retry=3, timeout=10):
         """
@@ -94,6 +107,35 @@ class eastmoney_fetcher:
         :param timeout: 超时时间
         :return: 响应对象
         """
+        from urllib.parse import urlparse
+        parsed = urlparse(url)
+        host = parsed.netloc.split(':')[0]
+
+        # 构造直连 Headers 绕过 Clash TUN Fake-IP (198.18.x.x)
+        cookie_str = self._get_cookie()
+        direct_headers = {
+            'Host': host,
+            'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Referer': 'https://quote.eastmoney.com/',
+            'Accept': '*/*',
+            'Accept-Language': 'zh-CN,zh;q=0.9',
+            'Accept-Encoding': 'gzip, deflate',
+        }
+        if cookie_str:
+            direct_headers['Cookie'] = cookie_str
+
+        real_ip = self._get_real_ip(host)
+        if real_ip:
+            direct_url = url.replace(host, real_ip, 1)
+            for i in range(retry):
+                try:
+                    resp = requests.get(direct_url, params=params, headers=direct_headers, proxies={'http': None, 'https': None}, timeout=timeout)
+                    if resp.status_code == 200:
+                        return resp
+                except Exception:
+                    pass
+                time.sleep(0.5)
+
         for i in range(retry):
             try:
                 response = self.session.get(
@@ -104,11 +146,9 @@ class eastmoney_fetcher:
                 )
                 response.raise_for_status()  # 检查HTTP错误
                 return response
-            except requests.exceptions.RequestException as e:
-                print(f"请求错误: {e}, 第 {i + 1}/{retry} 次重试")
+            except requests.exceptions.RequestException:
                 if i < retry - 1:
-                    # 随机延迟后重试
-                    time.sleep(random.uniform(1, 3))
+                    time.sleep(random.uniform(1, 2))
                 else:
                     raise
 

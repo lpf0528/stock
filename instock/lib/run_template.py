@@ -13,8 +13,27 @@ __author__ = 'myh '
 __date__ = '2023/3/10 '
 
 
+import os
+
+def setup_logging():
+    logger = logging.getLogger()
+    if not logger.handlers:
+        logger.setLevel(logging.INFO)
+        formatter = logging.Formatter('%(asctime)s [%(levelname)s] %(message)s')
+        cpath_current = os.path.dirname(os.path.dirname(__file__))
+        log_path = os.path.join(cpath_current, 'log')
+        if not os.path.exists(log_path):
+            os.makedirs(log_path)
+        fh = logging.FileHandler(os.path.join(log_path, 'stock_execute_job.log'), encoding='utf-8')
+        fh.setFormatter(formatter)
+        logger.addHandler(fh)
+        sh = logging.StreamHandler(sys.stdout)
+        sh.setFormatter(formatter)
+        logger.addHandler(sh)
+
 # 通用函数，获得日期参数，支持批量作业。
 def run_with_args(run_fun, *args):
+    setup_logging()
     if len(sys.argv) == 3:
         # 区间作业 python xxx.py 2023-03-01 2023-03-21
         tmp_year, tmp_month, tmp_day = sys.argv[1].split("-")
@@ -26,6 +45,7 @@ def run_with_args(run_fun, *args):
             with concurrent.futures.ThreadPoolExecutor() as executor:
                 while run_date <= end_date:
                     if trd.is_trade_date(run_date):
+                        logging.info(f"▶️ 执行子任务: {run_fun.__name__} (日期范围: {run_date})")
                         executor.submit(run_fun, run_date, *args)
                         time.sleep(2)
                     run_date += datetime.timedelta(days=1)
@@ -40,6 +60,7 @@ def run_with_args(run_fun, *args):
                     tmp_year, tmp_month, tmp_day = date.split("-")
                     run_date = datetime.datetime(int(tmp_year), int(tmp_month), int(tmp_day)).date()
                     if trd.is_trade_date(run_date):
+                        logging.info(f"▶️ 执行子任务: {run_fun.__name__} (指定日期: {run_date})")
                         executor.submit(run_fun, run_date, *args)
                         time.sleep(2)
         except Exception as e:
@@ -48,6 +69,7 @@ def run_with_args(run_fun, *args):
         # 当前时间作业 python xxx.py
         try:
             run_date, run_date_nph = trd.get_trade_date_last()
+            logging.info(f"▶️ 执行子任务: {run_fun.__name__} (实时/最新交易日: {run_date_nph})")
             if run_fun.__name__.startswith('save_nph'):
                 run_fun(run_date_nph, False)
             elif run_fun.__name__.startswith('save_after_close'):
