@@ -29,8 +29,8 @@ class proxys(metaclass=singleton_type):
         return self.data
 
     def get_proxies(self):
-        if self.data is None or len(self.data)==0:
-            return None
+        if self.data is None or len(self.data) == 0:
+            return {"http": None, "https": None}
 
         proxy = random.choice(self.data)
         return {"http": proxy, "https": proxy}

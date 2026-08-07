@@ -22,8 +22,11 @@ class eastmoney_fetcher:
     def __init__(self):
         """初始化获取器"""
         self.base_dir = os.path.dirname(os.path.dirname(__file__))
-        self.session = self._create_session()
         self.proxies = proxys().get_proxies()
+        # 如果未配置代理文件，默认禁用系统代理 (避免本地 Clash/V2Ray 等 7897 代理端口拦截东方财富接口)
+        if not self.proxies:
+            self.proxies = {"http": None, "https": None}
+        self.session = self._create_session()
 
     def _get_cookie(self):
         """
@@ -33,7 +36,6 @@ class eastmoney_fetcher:
         # 1. 尝试从环境变量获取
         cookie = os.environ.get('EAST_MONEY_COOKIE')
         if cookie:
-            # print("环境变量中的Cookie: 已设置")
             return cookie
 
         # 2. 尝试从文件获取
@@ -42,10 +44,9 @@ class eastmoney_fetcher:
             with open(cookie_file, 'r') as f:
                 cookie = f.read().strip()
             if cookie:
-                # print("文件中的Cookie: 已设置")
                 return cookie
 
-        # 3. 默认Cookie（可能过期，仅作为备选）
+        # 3. 默认Cookie（仅作为备选）
         return 'st_si=78948464251292; st_psi=20260205091253851-119144370567-1089607836; st_pvi=07789985376191; st_sp=2026-02-05%2009%3A11%3A13; st_inirUrl=https%3A%2F%2Fxuangu.eastmoney.com%2FResult; st_sn=12; st_asi=20260205091253851-119144370567-1089607836-webznxg.dbssk.qxg-1'
 
     def _create_session(self):
@@ -70,6 +71,7 @@ class eastmoney_fetcher:
         session.mount("https://", adapter)
 
         # 设置请求头
+        cookie_str = self._get_cookie()
         headers = {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
             'Referer': 'https://quote.eastmoney.com/',
@@ -78,9 +80,9 @@ class eastmoney_fetcher:
             'Accept-Encoding': 'gzip, deflate, br, zstd',
             'Connection': 'keep-alive',
         }
+        if cookie_str:
+            headers['Cookie'] = cookie_str
         session.headers.update(headers)
-        # 设置Cookie
-        session.cookies.update({'Cookie': self._get_cookie()})
         return session
 
     def make_request(self, url, params=None, retry=3, timeout=10):
