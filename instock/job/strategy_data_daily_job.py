@@ -19,6 +19,24 @@ from instock.core.stockfetch import fetch_stock_top_entity_data
 __author__ = 'myh '
 __date__ = '2023/3/10 '
 
+STRATEGY_CODE_PREFIX = "60"
+
+
+def filter_strategy_universe(stocks):
+    """只保留沪市 60 开头代码，作为策略选股的统一股票池。"""
+    selected = {
+        stock: stock_data
+        for stock, stock_data in stocks.items()
+        if len(stock) > 1 and str(stock[1]).startswith(STRATEGY_CODE_PREFIX)
+    }
+    logging.info(
+        "strategy_data_daily_job.filter_strategy_universe prefix=%s input=%s selected=%s",
+        STRATEGY_CODE_PREFIX,
+        len(stocks),
+        len(selected),
+    )
+    return selected
+
 
 def prepare(date, strategy):
     try:
@@ -55,6 +73,16 @@ def prepare(date, strategy):
 
 
 def run_check(strategy_fun, table_name, stocks, date, workers=40):
+    stocks = filter_strategy_universe(stocks)
+    if not stocks:
+        logging.warning(
+            "strategy_data_daily_job.run_check没有符合代码前缀 %s 的股票: strategy=%s date=%s",
+            STRATEGY_CODE_PREFIX,
+            table_name,
+            date,
+        )
+        return None
+
     is_check_high_tight = False
     if strategy_fun.__name__ == 'check_high_tight':
         stock_tops = fetch_stock_top_entity_data(date)
