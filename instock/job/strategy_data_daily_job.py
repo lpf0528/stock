@@ -111,6 +111,17 @@ def run_check(strategy_fun, table_name, stocks, date, workers=40):
 
 
 def main():
+    # 当前运行快照若缺少全市场行情，历史策略不能可靠运行；改用已有综合选股数据。
+    if not mdb.checkTableIsExist(tbs.TABLE_CN_STOCK_SPOT['name']):
+        from instock.job.available_data_strategy_job import main as available_data_strategy_main
+
+        logging.warning(
+            "strategy_data_daily_job未检测到 %s，启用可用数据降级策略",
+            tbs.TABLE_CN_STOCK_SPOT['name'],
+        )
+        available_data_strategy_main()
+        return
+
     # 使用方法传递。
     with concurrent.futures.ThreadPoolExecutor() as executor:
         for strategy in tbs.TABLE_CN_STOCK_STRATEGIES:
