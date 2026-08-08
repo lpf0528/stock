@@ -10,6 +10,7 @@ import datetime
 import instock.lib.trade_time as trd
 import instock.core.singleton_stock_web_module_data as sswmd
 import instock.web.base as webBase
+import instock.lib.database as mdb
 
 __author__ = 'myh '
 __date__ = '2023/3/10 '
@@ -65,7 +66,17 @@ class GetStockDataHandler(webBase.BaseHandler, ABC):
         if web_module_data.order_columns is not None:
             order_columns = f",{web_module_data.order_columns}"
 
+        # 检查表是否存在，避免在每日任务未运行时出现 Table doesn't exist 错误
+        if not mdb.checkTableIsExist(web_module_data.table_name):
+            self.write(json.dumps([], cls=MyEncoder))
+            return
+
         sql = f" SELECT *{order_columns} FROM `{web_module_data.table_name}`{where}{order_by}"
-        data = self.db.query(sql,date)
+        try:
+            data = self.db.query(sql, date)
+        except Exception:
+            # 表可能在检查后被删除，或数据库状态和缓存不一致
+            self.write(json.dumps([], cls=MyEncoder))
+            return
 
         self.write(json.dumps(data, cls=MyEncoder))

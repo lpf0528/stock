@@ -130,3 +130,139 @@ python instock/job/execute_daily_job.py
 # 5. 启动 Web 控制台 (访问 http://localhost:9988)
 python instock/web/web_service.py
 ```
+
+---
+
+## 五、 故障排查：东方财富接口连接失败 (push2.eastmoney.com)
+
+> 记录时间：2026-08-08
+> 症状：执行 `execute_daily_job.py` 时，步骤2（基础行情抓取）报错
+> `RemoteDisconnected('Remote end closed connection without response')`
+
+### 问题根因分析
+
+`push2.eastmoney.com`（实时行情推送 API）与 `data.eastmoney.com` / `push2his.eastmoney.com` 不同，它对访问来源有**严格限制**：
+
+| 接口域名 | 访问限制 |
+|---|---|
+| `push2.eastmoney.com` | 需要**有效登录 Cookie** + **大陆 IP** 直连，否则返回空响应 |
+| `push2his.eastmoney.com` | 无需 Cookie，大陆直连即可 |
+| `data.eastmoney.com` | 无需 Cookie，代理也可访问 |
+
+### 现象梳理
+
+1. **DNS 解析正常**：`nslookup push2.eastmoney.com` 返回大陆 IP（上海电信 `101.226.30.206`）
+2. **TLS 握手成功**：`curl -v` 显示 SSL 证书验证通过
+3. **HTTP 响应为空**：服务器建立连接后立即关闭，无任何 HTTP 响应头/体
+4. **代理无效**：无论是否走 Clash 代理，结果相同（代理出口 IP 为海外节点时更差）
+
+### 解决方案（按优先级排序）
+
+#### ✅ 方案 A：配置有效的东方财富登录 Cookie（**已实施，推荐**）
+
+`push2.eastmoney.com` 需要携带合法会话 Cookie 才返回数据。
+
+**操作步骤：**
+1. 用 Chrome 登录 https://passport2.eastmoney.com/
+2. 打开 https://quote.eastmoney.com/
+3. 按 F12 → Network → 找任意一个 `push2.eastmoney.com` 请求
+4. 右键 → Copy → Copy Request Headers → 提取 `Cookie: ...` 的值
+5. 将完整 Cookie 字符串写入：
+
+```bash
+echo "你的Cookie内容" > instock/config/eastmoney_cookie.txt
+```
+
+**代码读取优先级**（`eastmoney_fetcher.py`）：
+1. 环境变量 `EAST_MONEY_COOKIE`
+2. 文件 `instock/config/eastmoney_cookie.txt`
+3. 内置默认 Cookie（可能已过期）
+
+> ⚠️ **注意**：Cookie 有效期约 7~30 天，定期更新。
+
+---
+
+#### ✅ 方案 B：运行时取消代理环境变量（**已实施**）
+
+Clash Verge 开启系统代理后，`HTTP_PROXY` / `HTTPS_PROXY` 环境变量会被注入当前 Shell，导致 Python `requests` 库通过海外代理节点访问东方财富，被服务器拒绝。
+
+**每次运行前执行：**
+
+```bash
+unset HTTPS_PROXY HTTP_PROXY https_proxy http_proxy
+source .venv/bin/activate
+python instock/job/execute_daily_job.py
+```
+
+或写成一条命令：
+
+```bash
+env -u HTTPS_PROXY -u HTTP_PROXY -u https_proxy -u http_proxy python instock/job/execute_daily_job.py
+```
+
+---
+
+#### ✅ 方案 C：Clash 规则中为 push2.eastmoney.com 添加直连规则（**已实施**）
+
+若使用 Clash Verge，需在 Clash 配置 `fake-ip-filter` 和 `rules` 中显式排除 EastMoney 域名，避免 Fake-IP DNS 和代理规则干扰直连。
+
+**在 Clash 配置文件（`profiles/*.yaml`）中添加：**
+
+```yaml
+dns:
+  fake-ip-filter:
+    - '*.eastmoney.com'   # 新增：不对 eastmoney.com 使用 Fake-IP
+
+rules:
+  # 新增（放在所有规则最前面）：
+  - 'DOMAIN,push2.eastmoney.com,🎯 全球直连'
+  - 'DOMAIN,push2his.eastmoney.com,🎯 全球直连'
+```
+
+修改后需在 Clash Verge 中**重载配置文件**才能生效。
+
+---
+
+#### ✅ 方案 D：分页请求定期刷新 Session（**已实施**）
+
+`push2.eastmoney.com` 对单个 TCP 连接的请求数量有限制（约 5 页/连接，每页 500 条）。当抓取全量股票（约 5300+支）时，第 6 页开始会被服务器强制断连。
+
+**修复方案**（已写入 `stock_hist_em.py`）：每 5 页刷新一次 HTTP session，并适当增加请求间延迟。
+
+```python
+# 每5页刷新一次session，避免服务器端连接被关闭
+if page_current % 5 == 1:
+    fetcher.session = fetcher._create_session()
+time.sleep(random.uniform(1.5, 2.5))  # 延迟从1-1.5s提高到1.5-2.5s
+```
+
+---
+
+### 已知残余问题
+
+资金流向接口（`fetch_stocks_fund_flow`、`fetch_stocks_sector_fund_flow`）仍会偶发失败，原因是这些接口**并行发起多个** `push2.eastmoney.com` 请求，触发服务器频率限制更快。
+
+**影响范围**：`cn_stock_fund_flow_*` 表当日数据为空。  
+**临时规避**：这些数据属于"锦上添花"项，不影响核心选股、指标和回测功能正常运行。
+
+---
+
+### 快速诊断命令
+
+```bash
+# 1. 检测 push2.eastmoney.com 是否可直连（不走代理）
+unset HTTPS_PROXY HTTP_PROXY https_proxy http_proxy
+curl -4 -s --noproxy '*' \
+  -H 'Cookie: $(cat instock/config/eastmoney_cookie.txt)' \
+  -H 'Referer: https://quote.eastmoney.com/' \
+  "https://push2.eastmoney.com/api/qt/clist/get?pn=1&pz=3&po=1&np=1&ut=bd1d9ddb04089700cf9c27f6f7426281&fltt=2&invt=2&fid=f12&fs=m%3A0+t%3A6&fields=f2%2Cf12%2Cf14&_=1623833739532" | head -c 200
+
+# 2. 检测 push2his.eastmoney.com（历史K线，应始终可用）
+curl -4 -s --noproxy '*' \
+  "https://push2his.eastmoney.com/api/qt/stock/kline/get?fields1=f1,f2,f3,f4,f5,f6&fields2=f51,f52,f53,f54,f55,f56&ut=7eea3edcaed734bea9cbfc24409ed989&klt=101&fqt=1&secid=1.600519&beg=20260101&end=20260808&_=1" | head -c 200
+
+# 3. 确认当前 Shell 无代理变量
+env | grep -i proxy
+```
+
+预期正常输出：命令1返回 `{"rc":0,"rt":...` 格式 JSON，命令2同上，命令3无输出。

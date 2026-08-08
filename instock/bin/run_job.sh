@@ -3,6 +3,12 @@
 #export PYTHONPATH=/data/InStock
 
 #nohup  &
+unset HTTP_PROXY
+unset HTTPS_PROXY
+unset ALL_PROXY
+unset http_proxy
+unset https_proxy
+unset all_proxy
 /usr/local/bin/python3 /data/InStock/instock/job/execute_daily_job.py
 
 echo ------整体作业 支持批量作业------

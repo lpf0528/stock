@@ -28,9 +28,13 @@ class stock_data(metaclass=singleton_type):
 class stock_hist_data(metaclass=singleton_type):
     def __init__(self, date=None, stocks=None, workers=16):
         if stocks is None:
-            _subset = stock_data(date).get_data()[list(tbs.TABLE_CN_STOCK_FOREIGN_KEY['columns'])]
+            _raw_data = stock_data(date).get_data()
+            if _raw_data is None:
+                self.data = None
+                return
+            _subset = _raw_data[list(tbs.TABLE_CN_STOCK_FOREIGN_KEY['columns'])]
             stocks = [tuple(x) for x in _subset.values]
-        if stocks is None:
+        if not stocks:
             self.data = None
             return
         date_start, is_cache = trd.get_trade_hist_interval(stocks[0][0])  # 提高运行效率，只运行一次

@@ -2,6 +2,8 @@
 
 本文档是该项目的 AI Agent 上下文配置文件。任何 AI Assistant（如 Antigravity）在访问本工作区时，会自动载入此文件作为项目的上下文与规范指导。
 
+> **运行状态前置条件**：开始任何数据分析、任务排障或功能评估前，必须先阅读根目录 `AGENTS.md` 和 `docs/database_capability_context.md`。后者是基于实际 MySQL 数据库的动态快照；不要仅根据本文件或 `tablestructure.py` 推断功能已经可用。
+
 ---
 
 ## 1. 项目简介

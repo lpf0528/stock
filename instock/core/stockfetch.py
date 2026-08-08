@@ -29,6 +29,9 @@ cpath_current = os.path.dirname(os.path.dirname(__file__))
 stock_hist_cache_path = os.path.join(cpath_current, 'cache', 'hist')
 if not os.path.exists(stock_hist_cache_path):
     os.makedirs(stock_hist_cache_path)  # 创建多个文件夹结构。
+stock_sector_fund_flow_cache_path = os.path.join(cpath_current, 'cache', 'sector_fund_flow')
+if not os.path.exists(stock_sector_fund_flow_cache_path):
+    os.makedirs(stock_sector_fund_flow_cache_path)
 
 
 # 600 601 603 605开头的股票是上证A股
@@ -138,16 +141,65 @@ def fetch_stocks_fund_flow(index):
 
 # 读取板块资金流向
 def fetch_stocks_sector_fund_flow(index_sector, index_indicator):
+    sector_name = tbs.CN_STOCK_SECTOR_FUND_FLOW[0][index_sector]
     try:
         cn_flow = tbs.CN_STOCK_SECTOR_FUND_FLOW[1][index_indicator]
-        data = sff.stock_sector_fund_flow_rank(indicator=cn_flow['cn'], sector_type=tbs.CN_STOCK_SECTOR_FUND_FLOW[0][index_sector])
+        logging.info(
+            f"stockfetch.fetch_stocks_sector_fund_flow开始抓取: sector={sector_name}, "
+            f"indicator={cn_flow['cn']}, index_sector={index_sector}, index_indicator={index_indicator}"
+        )
+        data = sff.stock_sector_fund_flow_rank(indicator=cn_flow['cn'], sector_type=sector_name)
         if data is None or len(data.index) == 0:
-            return None
+            logging.warning(
+                f"stockfetch.fetch_stocks_sector_fund_flow返回空数据: sector={sector_name}, "
+                f"indicator={cn_flow['cn']}"
+            )
+            return _load_sector_fund_flow_cache(sector_name, cn_flow['cn'])
         data.columns = list(cn_flow['columns'])
+        logging.info(
+            f"stockfetch.fetch_stocks_sector_fund_flow抓取成功: sector={sector_name}, "
+            f"indicator={cn_flow['cn']}, rows={len(data.index)}, cols={list(data.columns)}"
+        )
+        _save_sector_fund_flow_cache(sector_name, cn_flow['cn'], data)
         return data
     except Exception as e:
-        logging.error(f"stockfetch.fetch_stocks_sector_fund_flow处理异常：{e}")
-    return None
+        logging.exception(
+            f"stockfetch.fetch_stocks_sector_fund_flow处理异常: sector={sector_name}, "
+            f"index_indicator={index_indicator}, error={e}"
+        )
+        cn_flow = tbs.CN_STOCK_SECTOR_FUND_FLOW[1][index_indicator]
+        return _load_sector_fund_flow_cache(sector_name, cn_flow['cn'])
+
+
+def _sector_fund_flow_cache_file(sector_name, indicator_cn):
+    safe_sector = sector_name.replace('/', '_').replace(' ', '_')
+    safe_indicator = indicator_cn.replace('/', '_').replace(' ', '_')
+    return os.path.join(stock_sector_fund_flow_cache_path, f"{safe_sector}_{safe_indicator}.gzip.pickle")
+
+
+def _save_sector_fund_flow_cache(sector_name, indicator_cn, data):
+    cache_file = _sector_fund_flow_cache_file(sector_name, indicator_cn)
+    try:
+        data.to_pickle(cache_file, compression="gzip")
+        logging.info(f"stockfetch._save_sector_fund_flow_cache已缓存: {cache_file}")
+    except Exception as e:
+        logging.exception(f"stockfetch._save_sector_fund_flow_cache处理异常: file={cache_file}, error={e}")
+
+
+def _load_sector_fund_flow_cache(sector_name, indicator_cn):
+    cache_file = _sector_fund_flow_cache_file(sector_name, indicator_cn)
+    if not os.path.isfile(cache_file):
+        logging.warning(f"stockfetch._load_sector_fund_flow_cache未命中缓存: {cache_file}")
+        return None
+    try:
+        data = pd.read_pickle(cache_file, compression="gzip")
+        # 调度层据此拒绝将历史快照写为本次交易日的真实数据。
+        data.attrs['is_stale_cache'] = True
+        logging.warning(f"stockfetch._load_sector_fund_flow_cache命中缓存: {cache_file}, rows={len(data.index)}")
+        return data
+    except Exception as e:
+        logging.exception(f"stockfetch._load_sector_fund_flow_cache处理异常: file={cache_file}, error={e}")
+        return None
 
 
 # 读取股票分红配送

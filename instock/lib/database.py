@@ -197,8 +197,12 @@ def checkTableIsExist(tableName):
             db.execute("""
                 SELECT COUNT(*)
                 FROM information_schema.tables
-                WHERE table_name = '{0}'
-                """.format(tableName.replace('\'', '\'\'')))
+                WHERE table_schema = '{1}'
+                  AND table_name = '{0}'
+                """.format(
+                    tableName.replace('\'', '\'\''),
+                    db_database.replace('\'', '\'\''),
+                ))
             if db.fetchone()[0] == 1:
                 return True
     return False

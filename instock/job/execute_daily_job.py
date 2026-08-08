@@ -8,11 +8,17 @@ import concurrent.futures
 import logging
 import os.path
 import sys
+import os
 
 # 在项目运行时，临时将项目路径添加到环境变量
 cpath_current = os.path.dirname(os.path.dirname(__file__))
 cpath = os.path.abspath(os.path.join(cpath_current, os.pardir))
 sys.path.append(cpath)
+
+# 强制清理系统代理，避免东方财富请求被本机代理劫持
+for _proxy_key in ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "all_proxy"):
+    os.environ.pop(_proxy_key, None)
+
 log_path = os.path.join(cpath_current, 'log')
 if not os.path.exists(log_path):
     os.makedirs(log_path)

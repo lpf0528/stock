@@ -4,12 +4,20 @@
 import logging
 import concurrent.futures
 import os.path
+import os
 import sys
+import random
+import time
 import pandas as pd
 
 cpath_current = os.path.dirname(os.path.dirname(__file__))
 cpath = os.path.abspath(os.path.join(cpath_current, os.pardir))
 sys.path.append(cpath)
+
+# 强制清理系统代理，避免东方财富请求被本机代理劫持
+for _proxy_key in ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "all_proxy"):
+    os.environ.pop(_proxy_key, None)
+
 import instock.lib.run_template as runt
 import instock.core.tablestructure as tbs
 import instock.lib.database as mdb
@@ -144,61 +152,84 @@ def stock_sector_fund_flow_data(date, index_sector):
     sector_label = "行业资金流向 (cn_stock_fund_flow_industry)" if index_sector == 0 else "概念资金流向 (cn_stock_fund_flow_concept)"
     logging.info(f"📊 开始抓取并处理 {sector_label} (日期: {date})...")
     try:
+        tbs_table = tbs.TABLE_CN_STOCK_FUND_FLOW_INDUSTRY if index_sector == 0 else tbs.TABLE_CN_STOCK_FUND_FLOW_CONCEPT
+        table_name = tbs_table['name']
+        if not mdb.checkTableIsExist(table_name):
+            logging.warning(f"📊 {sector_label} 表不存在，先创建空表: {table_name}")
+            pd.DataFrame(columns=list(tbs_table['columns'].keys())).to_sql(
+                name=table_name,
+                con=mdb.engine(),
+                if_exists='replace',
+                index=False,
+                dtype=tbs.get_field_types(tbs_table['columns']),
+            )
+
         times = tuple(range(3))
         results = run_check_stock_sector_fund_flow(index_sector, times)
         if results is None:
             logging.warning(f"⚠️ 未获取到 {sector_label} 数据")
             return
 
+        logging.info(f"📊 {sector_label} 子任务返回: {sorted(results.keys())}")
         for t in times:
             if t == 0:
                 data = results.get(t)
+                if data is not None:
+                    logging.info(f"📊 {sector_label} 主表数据行数: {len(data.index)}")
             else:
                 r = results.get(t)
                 if r is not None:
+                    logging.info(f"📊 {sector_label} 合并前指标{t}数据行数: {len(r.index)}")
                     data = pd.merge(data, r, on=['name'], how='left')
 
         if data is None or len(data.index) == 0:
             logging.warning(f"⚠️ {sector_label} 数据为空")
             return
 
-        data.insert(0, 'date', date.strftime("%Y-%m-%d"))
+        if any(result.attrs.get('is_stale_cache', False) for result in results.values()):
+            logging.warning(f"⚠️ {sector_label} 本次仅获得历史缓存，跳过入库以避免伪造 {date} 的实时数据")
+            return
 
-        if index_sector == 0:
-            tbs_table = tbs.TABLE_CN_STOCK_FUND_FLOW_INDUSTRY
-        else:
-            tbs_table = tbs.TABLE_CN_STOCK_FUND_FLOW_CONCEPT
-        table_name = tbs_table['name']
+        data.insert(0, 'date', date.strftime("%Y-%m-%d"))
+        logging.info(f"📊 {sector_label} 处理后数据行数: {len(data.index)}, 列数: {len(data.columns)}")
         # 删除老数据。
         if mdb.checkTableIsExist(table_name):
             del_sql = f"DELETE FROM `{table_name}` where `date` = '{date}'"
+            logging.info(f"📊 {sector_label} 表已存在，先删除旧数据: {del_sql}")
             mdb.executeSql(del_sql)
             cols_type = None
         else:
             cols_type = tbs.get_field_types(tbs_table['columns'])
+            logging.info(f"📊 {sector_label} 表不存在，将按字段类型自动创建: {table_name}")
 
+        logging.info(f"📊 {sector_label} 开始入库: table={table_name}")
         mdb.insert_db_from_df(data, table_name, cols_type, False, "`date`,`name`")
         logging.info(f"✅ 成功保存 {sector_label} -> 数据量: {len(data.index)} 条，表名: `{table_name}`")
     except Exception as e:
-        logging.error(f"basic_data_other_daily_job.stock_sector_fund_flow_data处理异常：{e}")
+        logging.exception(f"basic_data_other_daily_job.stock_sector_fund_flow_data处理异常：{e}")
 
 
 def run_check_stock_sector_fund_flow(index_sector, times):
     data = {}
     try:
-        with concurrent.futures.ThreadPoolExecutor(max_workers=len(times)) as executor:
-            future_to_data = {executor.submit(stf.fetch_stocks_sector_fund_flow, index_sector, k): k for k in times}
-            for future in concurrent.futures.as_completed(future_to_data):
-                _time = future_to_data[future]
-                try:
-                    _data_ = future.result()
-                    if _data_ is not None:
-                        data[_time] = _data_
-                except Exception as e:
-                    logging.error(f"basic_data_other_daily_job.run_check_stock_sector_fund_flow处理异常：代码{e}")
+        logging.info(f"basic_data_other_daily_job.run_check_stock_sector_fund_flow开始: index_sector={index_sector}, times={times}")
+        # 东财 push2 会对同一出口的并发访问快速限流；三个指标必须串行抓取。
+        for _time in times:
+            try:
+                _data_ = stf.fetch_stocks_sector_fund_flow(index_sector, _time)
+                if _data_ is not None:
+                    data[_time] = _data_
+                    logging.info(f"basic_data_other_daily_job.run_check_stock_sector_fund_flow完成: index_sector={index_sector}, index_indicator={_time}, rows={len(_data_.index)}")
+                else:
+                    logging.warning(f"basic_data_other_daily_job.run_check_stock_sector_fund_flow为空: index_sector={index_sector}, index_indicator={_time}")
+            except Exception as e:
+                logging.exception(f"basic_data_other_daily_job.run_check_stock_sector_fund_flow处理异常：index_sector={index_sector}, index_indicator={_time}, error={e}")
+            # 与接口内部重试叠加的节流，避免三个指标紧邻发起。
+            time.sleep(random.uniform(2, 5))
     except Exception as e:
-        logging.error(f"basic_data_other_daily_job.run_check_stock_sector_fund_flow处理异常：{e}")
+        logging.exception(f"basic_data_other_daily_job.run_check_stock_sector_fund_flow处理异常：{e}")
     if not data:
+        logging.warning(f"basic_data_other_daily_job.run_check_stock_sector_fund_flow最终无可用数据: index_sector={index_sector}")
         return None
     else:
         return data

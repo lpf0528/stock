@@ -6,11 +6,18 @@ import logging
 import concurrent.futures
 import pandas as pd
 import os.path
+import os
 import sys
 
 cpath_current = os.path.dirname(os.path.dirname(__file__))
 cpath = os.path.abspath(os.path.join(cpath_current, os.pardir))
 sys.path.append(cpath)
+
+# 此文件可被单独执行。清理系统代理，避免 curl_cffi/libcurl 将东方财富请求
+# 经由 Clash 等本地代理转发，导致 push2.eastmoney.com 主动断开连接。
+for _proxy_key in ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "all_proxy"):
+    os.environ.pop(_proxy_key, None)
+
 import instock.lib.run_template as runt
 import instock.core.tablestructure as tbs
 import instock.lib.database as mdb
