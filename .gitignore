@@ -138,6 +138,10 @@ venv.bak/
 
 # mypy
 .mypy_cache/
+
+# Cross-project pipeline runtime evidence; keep only documented examples in Git.
+runtime/job_receipts/*.json
+!runtime/job_receipts/.gitkeep
 .dmypy.json
 dmypy.json
 
