@@ -8,6 +8,7 @@ import os
 import sys
 import random
 import time
+import gc
 import pandas as pd
 
 cpath_current = os.path.dirname(os.path.dirname(__file__))
@@ -79,19 +80,9 @@ def save_nph_stock_fund_flow_data(date, before=True):
         return
 
     try:
-        times = tuple(range(4))
-        results = run_check_stock_fund_flow(times)
-        if results is None:
+        data = build_stock_fund_flow_data(tuple(range(4)))
+        if data is None:
             return
-
-        for t in times:
-            if t == 0:
-                data = results.get(t)
-            else:
-                r = results.get(t)
-                if r is not None:
-                    r.drop(columns=['name', 'new_price'], inplace=True)
-                    data = pd.merge(data, r, on=['code'], how='left')
 
         if data is None or len(data.index) == 0:
             return
@@ -110,6 +101,38 @@ def save_nph_stock_fund_flow_data(date, before=True):
         mdb.insert_db_from_df(data, table_name, cols_type, False, "`date`,`code`")
     except Exception as e:
         logging.error(f"basic_data_other_daily_job.save_nph_stock_fund_flow_data处理异常：{e}")
+
+
+def build_stock_fund_flow_data(times):
+    """Fetch periods one at a time and retain only fields needed for the merge.
+
+    A full THS ranking has thousands of rows and many empty legacy columns.
+    Keeping all four rankings at once caused the daily process to be killed
+    after the final fetch, before the database write.  Streaming the merge
+    bounds memory while preserving the existing table contract.
+    """
+    data = None
+    for index in times:
+        period = stf.fetch_stocks_fund_flow(index)
+        if period is None or period.empty:
+            logging.warning("个股资金流周期无数据: index=%s", index)
+            continue
+        duplicated = int(period.duplicated(subset=['code'], keep='last').sum())
+        if duplicated:
+            logging.warning("个股资金流周期存在重复代码，按最后一条保留: index=%s duplicates=%s", index, duplicated)
+            period = period.drop_duplicates(subset=['code'], keep='last').copy()
+        if index == 0:
+            data = period.copy()
+        else:
+            # name/new_price already come from the instant ranking.  Empty
+            # legacy order-size columns must not be carried through merges.
+            columns = [column for column in period.columns if column == 'code' or (column not in {'name', 'new_price'} and period[column].notna().any())]
+            data = pd.merge(data, period.loc[:, columns], on=['code'], how='left', validate='one_to_one')
+        del period
+        gc.collect()
+    if data is None or data.empty:
+        return None
+    return data
 
 
 def run_check_stock_fund_flow(times):

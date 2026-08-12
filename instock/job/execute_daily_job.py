@@ -4,7 +4,6 @@
 
 import time
 import datetime
-import concurrent.futures
 import logging
 import os.path
 import sys
@@ -34,15 +33,7 @@ if not logger.handlers:
     stream_handler.setFormatter(formatter)
     logger.addHandler(stream_handler)
 
-import init_job as bj
-import basic_data_daily_job as hdj
-import basic_data_other_daily_job as hdtj
-import basic_data_after_close_daily_job as acdj
-import indicators_data_daily_job as gdj
-import strategy_data_daily_job as sdj
-import backtest_data_daily_job as bdj
-import klinepattern_data_daily_job as kdj
-import selection_data_daily_job as sddj
+from instock.job.daily_fetch_pipeline import DEFAULT_RECEIPT_PATH, default_date, run_fetches
 
 __author__ = 'myh '
 __date__ = '2023/3/10 '
@@ -55,33 +46,16 @@ def main():
     logging.info(f"🚀 ######## 每日盘后 Job 任务开始执行: {_start.strftime('%Y-%m-%d %H:%M:%S.%f')} #######")
     logging.info("=" * 60)
     
-    # 第1步创建数据库
-    logging.info("📌 [步骤 1/5] 初始化数据库结构 (init_job)...")
-    bj.main()
-    
-    # 第2.1步创建股票基础数据表
-    logging.info("📌 [步骤 2/5] 抓取并保存股票/ETF基础行情数据 (basic_data_daily_job)...")
-    hdj.main()
-    
-    # 第2.2步创建综合股票数据表
-    logging.info("📌 [步骤 3/5] 抓取并保存综合选股分类数据 (selection_data_daily_job)...")
-    sddj.main()
-    
-    logging.info("📌 [步骤 4/5] 抓取其它基础数据: 龙虎榜、资金流向、板块资金流向、分红 (basic_data_other_daily_job)...")
-    with concurrent.futures.ThreadPoolExecutor() as executor:
-        # 第3.1步创建股票其它基础数据表
-        future_hdtj = executor.submit(hdtj.main)
-        future_hdtj.result()
-
-    # 第7步创建股票闭盘后才有的数据
-    logging.info("📌 [步骤 5/5] 抓取闭盘后大宗交易与尾盘抢筹数据 (basic_data_after_close_daily_job)...")
-    acdj.main()
+    logging.info("📌 执行可观测的独立抓取项；每项以目标日期数据库行数验收...")
+    payload = run_fetches(date=default_date())
+    logging.info("每日抓取终态=%s，回执=%s", payload["status"], DEFAULT_RECEIPT_PATH)
 
     logging.info("=" * 60)
     logging.info(f"🎉 ######## 完成所有每日 Job 任务, 总耗时: {time.time() - start:.2f} 秒 #######")
     logging.info("=" * 60)
+    return 0 if payload["status"] == "completed" else 1
 
 
 # main函数入口
 if __name__ == '__main__':
-    main()
+    raise SystemExit(main())

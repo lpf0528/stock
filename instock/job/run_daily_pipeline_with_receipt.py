@@ -23,6 +23,7 @@ from typing import Callable
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 RECEIPT_PATH = PROJECT_ROOT / "runtime" / "job_receipts" / "latest.json"
+FETCH_RECEIPT_PATH = PROJECT_ROOT / "runtime" / "job_receipts" / "daily_fetch_latest.json"
 REPORT_PATTERN = re.compile(r"数据交易日：\s*(\d{4}-\d{2}-\d{2})")
 
 
@@ -76,9 +77,19 @@ def run_pipeline(
         "status": "failed",
         "exit_code": 1,
         "strategy_report_path": None,
+        "fetch_receipt_path": None,
     }
     try:
         command_runner([sys.executable, "instock/job/execute_daily_job.py"])
+        # execute_daily_job writes the per-fetch terminal evidence.  Preserve
+        # compatibility with injected test runners, while a real invocation
+        # must not advance to strategy generation after partial collection.
+        if FETCH_RECEIPT_PATH.is_file():
+            fetch_receipt = json.loads(FETCH_RECEIPT_PATH.read_text(encoding="utf-8"))
+            payload["fetch_receipt_path"] = str(FETCH_RECEIPT_PATH)
+            if fetch_receipt.get("status") != "completed":
+                failed = [item.get("id", "unknown") for item in fetch_receipt.get("items", []) if item.get("status") == "failed"]
+                raise RuntimeError(f"每日抓取未全部验收成功，失败项：{', '.join(failed) or '未提供明细'}")
         command_runner([sys.executable, "instock/job/strategy_data_daily_job.py"])
 
         # The fallback strategy selects the database's latest available date.

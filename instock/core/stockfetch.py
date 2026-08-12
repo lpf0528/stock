@@ -19,6 +19,7 @@ import instock.core.crawling.stock_dzjy_em as sde
 import instock.core.crawling.stock_hist_em as she
 import instock.core.crawling.stock_zh_a_tx as sht
 import instock.core.crawling.stock_fund_em as sff
+import instock.core.crawling.stock_fund_ths as sft
 import instock.core.crawling.stock_fhps_em as sfe
 import instock.core.crawling.stock_chip_race as scr
 import instock.core.crawling.stock_limitup_reason as slr
@@ -153,7 +154,22 @@ def fetch_stock_selection():
 def fetch_stocks_fund_flow(index):
     try:
         cn_flow = tbs.CN_STOCK_FUND_FLOW[index]
-        data = sff.stock_individual_fund_flow_rank(indicator=cn_flow['cn'])
+        source = os.environ.get('STOCK_FUND_FLOW_SOURCE', 'ths').strip().lower()
+        if source not in {'ths', 'eastmoney', 'auto'}:
+            raise ValueError("STOCK_FUND_FLOW_SOURCE 仅支持 ths、eastmoney 或 auto")
+        data = None
+        if source in {'eastmoney', 'auto'}:
+            try:
+                data = sff.stock_individual_fund_flow_rank(indicator=cn_flow['cn'])
+            except Exception as exc:
+                if source == 'eastmoney':
+                    raise
+                logging.warning("东方财富个股资金流不可用，切换同花顺: %s", exc)
+        if data is None or len(data.index) == 0:
+            if source == 'eastmoney':
+                return None
+            data = sft.stock_individual_fund_flow_rank_ths(indicator=cn_flow['cn'])
+            logging.info("stockfetch.fetch_stocks_fund_flow数据源=同花顺 indicator=%s rows=%s", cn_flow['cn'], len(data.index))
         if data is None or len(data.index) == 0:
             return None
         data.columns = list(cn_flow['columns'])

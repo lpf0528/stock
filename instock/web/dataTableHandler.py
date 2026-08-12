@@ -40,6 +40,18 @@ class GetStockHtmlHandler(webBase.BaseHandler, ABC):
             date_now_str = run_date_nph.strftime("%Y-%m-%d")
         else:
             date_now_str = run_date.strftime("%Y-%m-%d")
+        # Some provider-backed realtime tables can lag the latest trading day.
+        # Do not render a known-empty current date when verified historical
+        # rows exist; the API still honours an explicitly selected date.
+        if (web_module_data.is_realtime
+                and mdb.checkTableIsExist(web_module_data.table_name)
+                and mdb.executeSqlCount(
+                    f"SELECT COUNT(*) FROM `{web_module_data.table_name}` WHERE `date` = %s",
+                    (date_now_str,),
+                ) == 0):
+            latest = mdb.executeSqlFetch(f"SELECT MAX(`date`) FROM `{web_module_data.table_name}`")
+            if latest and latest[0][0] is not None:
+                date_now_str = latest[0][0].isoformat()
         self.render("stock_web.html", web_module_data=web_module_data, date_now=date_now_str,
                     leftMenu=webBase.GetLeftMenu(self.request.uri))
 
