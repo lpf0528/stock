@@ -15,23 +15,19 @@ import instock.core.tablestructure as tbs
 import instock.lib.database as mdb
 from instock.core.singleton_stock import stock_hist_data
 from instock.core.stockfetch import fetch_stock_top_entity_data
+from instock.core.stock_universe import filter_stock_records, get_stock_code_prefixes
 
 __author__ = 'myh '
 __date__ = '2023/3/10 '
 
-STRATEGY_CODE_PREFIX = "60"
-
-
 def filter_strategy_universe(stocks):
-    """只保留沪市 60 开头代码，作为策略选股的统一股票池。"""
-    selected = {
-        stock: stock_data
-        for stock, stock_data in stocks.items()
-        if len(stock) > 1 and str(stock[1]).startswith(STRATEGY_CODE_PREFIX)
-    }
+    """按项目统一股票池过滤策略输入。"""
+    prefixes = get_stock_code_prefixes()
+    selected_records = filter_stock_records(list(stocks), prefixes)
+    selected = {stock: stocks[stock] for stock in selected_records}
     logging.info(
-        "strategy_data_daily_job.filter_strategy_universe prefix=%s input=%s selected=%s",
-        STRATEGY_CODE_PREFIX,
+        "strategy_data_daily_job.filter_strategy_universe prefixes=%s input=%s selected=%s",
+        ",".join(prefixes) if prefixes else "all",
         len(stocks),
         len(selected),
     )
@@ -76,8 +72,7 @@ def run_check(strategy_fun, table_name, stocks, date, workers=40):
     stocks = filter_strategy_universe(stocks)
     if not stocks:
         logging.warning(
-            "strategy_data_daily_job.run_check没有符合代码前缀 %s 的股票: strategy=%s date=%s",
-            STRATEGY_CODE_PREFIX,
+            "strategy_data_daily_job.run_check没有符合统一股票池配置的股票: strategy=%s date=%s",
             table_name,
             date,
         )

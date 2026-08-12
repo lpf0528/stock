@@ -8,6 +8,7 @@ import numpy as np
 import pandas as pd
 import talib as tl
 import instock.core.tablestructure as tbs
+from instock.core.stock_universe import filter_stock_dataframe, get_stock_code_prefixes
 import instock.lib.trade_time as trd
 import instock.core.crawling.trade_date_hist as tdh
 import instock.core.crawling.fund_etf_em as fee
@@ -119,7 +120,16 @@ def fetch_stocks(date):
                 data.insert(0, 'date', date.strftime("%Y-%m-%d"))
             data.columns = list(tbs.TABLE_CN_STOCK_SPOT['columns'])
             data = data.loc[data['code'].apply(is_a_stock)].loc[data['new_price'].apply(is_open)]
-            logging.info("stockfetch.fetch_stocks source=%s rows=%s", source_name, len(data.index))
+            all_a_stock_count = len(data.index)
+            data = filter_stock_dataframe(data)
+            prefixes = get_stock_code_prefixes()
+            logging.info(
+                "stockfetch.fetch_stocks source=%s prefixes=%s input=%s selected=%s",
+                source_name,
+                ",".join(prefixes) if prefixes else "all",
+                all_a_stock_count,
+                len(data.index),
+            )
             return data
         except Exception as e:
             logging.warning("stockfetch.fetch_stocks source=%s failed: %s", source_name, e)

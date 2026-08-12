@@ -8,9 +8,22 @@ import instock.core.stockfetch as stf
 import instock.core.tablestructure as tbs
 import instock.lib.trade_time as trd
 from instock.lib.singleton_type import singleton_type
+from instock.core.stock_universe import (
+    DEFAULT_STOCK_CODE_PREFIXES,
+    LEGACY_HISTORY_CODE_PREFIXES_ENV,
+    filter_stock_records,
+    get_stock_code_prefixes,
+)
 
 __author__ = 'myh '
 __date__ = '2023/3/10 '
+
+
+# 保留旧导入名称，避免项目外调用方在升级后失效。
+HISTORY_CODE_PREFIXES_ENV = LEGACY_HISTORY_CODE_PREFIXES_ENV
+DEFAULT_HISTORY_CODE_PREFIXES = DEFAULT_STOCK_CODE_PREFIXES
+get_history_code_prefixes = get_stock_code_prefixes
+filter_history_universe = filter_stock_records
 
 
 # 读取当天股票数据
@@ -39,6 +52,15 @@ class stock_hist_data(metaclass=singleton_type):
                 return
             _subset = _raw_data[list(tbs.TABLE_CN_STOCK_FOREIGN_KEY['columns'])]
             stocks = [tuple(x) for x in _subset.values]
+            prefixes = get_stock_code_prefixes()
+            unfiltered_count = len(stocks)
+            stocks = filter_stock_records(stocks, prefixes)
+            logging.info(
+                "singleton.stock_hist_data历史股票池前缀=%s input=%s selected=%s",
+                ",".join(prefixes) if prefixes else "all",
+                unfiltered_count,
+                len(stocks),
+            )
             batch_offset = max(0, int(os.getenv("STOCK_HIST_BATCH_OFFSET", "0")))
             batch_limit = max(0, int(os.getenv("STOCK_HIST_BATCH_LIMIT", "0")))
             if batch_limit:
