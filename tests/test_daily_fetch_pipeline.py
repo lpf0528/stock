@@ -7,7 +7,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from instock.job.daily_fetch_pipeline import FetchJob, failed_job_ids, run_fetches
+from instock.job.daily_fetch_pipeline import FetchJob, failed_job_ids, resolve_job_ids, run_fetches
 
 
 def test_receipt_marks_only_verified_items_completed(tmp_path: Path) -> None:
@@ -49,3 +49,9 @@ def test_empty_retry_is_a_successful_no_op(tmp_path: Path) -> None:
 
     assert payload["items"] == []
     assert payload["status"] == "completed"
+
+
+def test_task_selector_accepts_job_id_table_name_and_display_name() -> None:
+    jobs = [FetchJob("limitup-reason", "涨停原因", "cn_stock_limitup_reason", lambda _date: None)]
+
+    assert resolve_job_ids(["limitup-reason", "cn_stock_limitup_reason", "涨停原因"], jobs) == {"limitup-reason"}

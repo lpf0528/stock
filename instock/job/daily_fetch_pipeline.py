@@ -91,6 +91,20 @@ def failed_job_ids(receipt: dict, date: dt.date) -> set[str]:
     return {item["id"] for item in receipt.get("items", []) if item.get("status") == "failed"}
 
 
+def resolve_job_ids(selectors: Iterable[str], jobs: Iterable[FetchJob]) -> set[str]:
+    """Resolve CLI selectors from a stable job id, table name, or display name."""
+    by_selector: dict[str, str] = {}
+    for job in jobs:
+        for selector in (job.id, job.table_name, job.name):
+            previous = by_selector.setdefault(selector, job.id)
+            if previous != job.id:
+                raise RuntimeError(f"抓取项选择器不唯一: {selector}")
+    unknown = sorted(set(selectors) - set(by_selector))
+    if unknown:
+        raise RuntimeError(f"未知抓取项: {', '.join(unknown)}")
+    return {by_selector[selector] for selector in selectors}
+
+
 def run_fetches(
     *,
     date: dt.date,
@@ -153,11 +167,17 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="独立执行并验收 stock 每日抓取项")
     parser.add_argument("--date", type=dt.date.fromisoformat, help="交易日 YYYY-MM-DD；默认最近交易日")
     parser.add_argument("--only-failed", action="store_true", help="仅重试同一交易日的上次失败项")
+    parser.add_argument("--task", action="append", metavar="ID_OR_TABLE", help="仅运行指定抓取项；可重复，接受任务 ID、表名或中文名称")
     parser.add_argument("--receipt", type=Path, default=DEFAULT_RECEIPT_PATH, help="抓取回执路径")
     args = parser.parse_args()
     date = args.date or default_date()
+    if args.only_failed and args.task:
+        parser.error("--only-failed 与 --task 不能同时使用")
+    jobs = _jobs()
     selected_ids = failed_job_ids(read_receipt(args.receipt), date) if args.only_failed else None
-    payload = run_fetches(date=date, receipt_path=args.receipt, selected_ids=selected_ids)
+    if args.task:
+        selected_ids = resolve_job_ids(args.task, jobs)
+    payload = run_fetches(date=date, receipt_path=args.receipt, jobs=jobs, selected_ids=selected_ids)
     print(f"抓取状态：{payload['status']}；回执：{args.receipt}")
     return 0 if payload["status"] == "completed" else 1
 

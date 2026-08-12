@@ -173,6 +173,15 @@ def fetch_stocks_fund_flow(index):
         if data is None or len(data.index) == 0:
             return None
         data.columns = list(cn_flow['columns'])
+        # THS occasionally returns non-security rows whose identifiers share a
+        # Beijing-exchange prefix but are longer than the six-character schema
+        # key.  ``is_a_stock`` intentionally only checks a market prefix for
+        # other callers, so validate the storage contract here before MySQL.
+        codes = data['code'].astype(str).str.strip()
+        invalid_code_count = int((~codes.str.fullmatch(r'\d{6}')).sum())
+        if invalid_code_count:
+            logging.warning("个股资金流已过滤非六位代码: rows=%s", invalid_code_count)
+        data = data.loc[codes.str.fullmatch(r'\d{6}').fillna(False)]
         data = data.loc[data['code'].apply(is_a_stock)].loc[data['new_price'].apply(is_open_with_line)]
         return data
     except Exception as e:

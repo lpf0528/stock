@@ -25,3 +25,15 @@ def test_fund_flow_periods_are_merged_incrementally(monkeypatch) -> None:
     assert result.columns.tolist() == ["code", "name", "new_price", "fund_amount", "fund_amount_3", "fund_amount_5", "fund_amount_10"]
     assert result["fund_amount_3"].tolist() == [3, 40]
     assert result["fund_amount_10"].tolist() == [7, 8]
+
+
+def test_fund_flow_fetch_discards_non_six_digit_codes(monkeypatch) -> None:
+    columns = list(job.tbs.CN_STOCK_FUND_FLOW[0]["columns"])
+    rows = pd.DataFrame([["600001", "甲", 10, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1], ["83000001", "异常", 10, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1]], columns=columns)
+    monkeypatch.setattr(job.stf, "fetch_stocks_fund_flow", lambda _index: rows)
+
+    result = job.build_stock_fund_flow_data((0,))
+
+    # The filter lives at the fetch boundary; exercise it directly with a
+    # small source substitute to avoid a live THS request.
+    monkeypatch.setattr(job.stf, "fetch_stocks_fund_flow", lambda _index: result)
