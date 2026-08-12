@@ -14,7 +14,11 @@ def get_indicators(data, end_date=None, threshold=120, calc_threshold=None):
     try:
         isCopy = False
         if end_date is not None:
-            mask = (data['date'] <= end_date)
+            # 历史源可能返回 ISO 字符串或 ``datetime.date``。统一比较日期，
+            # 避免腾讯等非 EastMoney 来源因类型不同被错误降级为全 0 指标。
+            normalized_dates = pd.to_datetime(data['date'], errors='coerce').dt.date
+            normalized_end_date = pd.to_datetime(end_date, errors='raise').date()
+            mask = (normalized_dates <= normalized_end_date)
             data = data.loc[mask]
             isCopy = True
         if calc_threshold is not None:

@@ -3,6 +3,7 @@
 
 import logging
 import concurrent.futures
+import os
 import instock.core.stockfetch as stf
 import instock.core.tablestructure as tbs
 import instock.lib.trade_time as trd
@@ -26,7 +27,11 @@ class stock_data(metaclass=singleton_type):
 
 # 读取股票历史数据
 class stock_hist_data(metaclass=singleton_type):
-    def __init__(self, date=None, stocks=None, workers=16):
+    def __init__(self, date=None, stocks=None, workers=None):
+        if workers is None:
+            # 腾讯日线是一股票一请求；保守默认值避免在首次全量历史回补时
+            # 触发上游限流。可由环境变量在已验证的网络环境中逐步提高。
+            workers = max(1, int(os.getenv("STOCK_HIST_WORKERS", "4")))
         if stocks is None:
             _raw_data = stock_data(date).get_data()
             if _raw_data is None:
@@ -34,6 +39,16 @@ class stock_hist_data(metaclass=singleton_type):
                 return
             _subset = _raw_data[list(tbs.TABLE_CN_STOCK_FOREIGN_KEY['columns'])]
             stocks = [tuple(x) for x in _subset.values]
+            batch_offset = max(0, int(os.getenv("STOCK_HIST_BATCH_OFFSET", "0")))
+            batch_limit = max(0, int(os.getenv("STOCK_HIST_BATCH_LIMIT", "0")))
+            if batch_limit:
+                stocks = stocks[batch_offset:batch_offset + batch_limit]
+                logging.info(
+                    "singleton.stock_hist_data受控历史批次 offset=%s limit=%s selected=%s",
+                    batch_offset,
+                    batch_limit,
+                    len(stocks),
+                )
         if not stocks:
             self.data = None
             return

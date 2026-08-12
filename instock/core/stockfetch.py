@@ -16,6 +16,7 @@ import instock.core.crawling.stock_lhb_em as sle
 import instock.core.crawling.stock_lhb_sina as sls
 import instock.core.crawling.stock_dzjy_em as sde
 import instock.core.crawling.stock_hist_em as she
+import instock.core.crawling.stock_zh_a_tx as sht
 import instock.core.crawling.stock_fund_em as sff
 import instock.core.crawling.stock_fhps_em as sfe
 import instock.core.crawling.stock_chip_race as scr
@@ -44,8 +45,14 @@ if not os.path.exists(stock_sector_fund_flow_cache_path):
 # 300、301开头的股票是创业板股票；400开头的股票是三板市场股票。
 # 430、83、87开头的股票是北证A股
 def is_a_stock(code):
-    # 上证A股  # 深证A股
-    return code.startswith(('600', '601', '603', '605', '000', '001', '002', '003', '300', '301'))
+    # 上证/深证主板、创业板、科创板和北交所 A 股；排除 200/900 等 B 股。
+    return str(code).zfill(6).startswith(
+        (
+            '600', '601', '603', '605', '688', '689',
+            '000', '001', '002', '003', '300', '301',
+            '430', '83', '87', '88', '92',
+        )
+    )
 
 
 # 过滤掉 st 股票。
@@ -95,19 +102,27 @@ def fetch_etfs(date):
 
 # 读取当天股票数据
 def fetch_stocks(date):
-    try:
-        data = she.stock_zh_a_spot_em()
-        if data is None or len(data.index) == 0:
-            return None
-        if date is None:
-            data.insert(0, 'date', datetime.datetime.now().strftime("%Y-%m-%d"))
-        else:
-            data.insert(0, 'date', date.strftime("%Y-%m-%d"))
-        data.columns = list(tbs.TABLE_CN_STOCK_SPOT['columns'])
-        data = data.loc[data['code'].apply(is_a_stock)].loc[data['new_price'].apply(is_open)]
-        return data
-    except Exception as e:
-        logging.error(f"stockfetch.fetch_stocks处理异常：{e}")
+    source = os.getenv("STOCK_MARKET_DATA_SOURCE", "tencent").strip().lower()
+    fetchers = (
+        (("腾讯", sht.stock_zh_a_spot_tx), ("东方财富", she.stock_zh_a_spot_em))
+        if source != "eastmoney"
+        else (("东方财富", she.stock_zh_a_spot_em), ("腾讯", sht.stock_zh_a_spot_tx))
+    )
+    for source_name, fetcher in fetchers:
+        try:
+            data = fetcher()
+            if data is None or len(data.index) == 0:
+                continue
+            if date is None:
+                data.insert(0, 'date', datetime.datetime.now().strftime("%Y-%m-%d"))
+            else:
+                data.insert(0, 'date', date.strftime("%Y-%m-%d"))
+            data.columns = list(tbs.TABLE_CN_STOCK_SPOT['columns'])
+            data = data.loc[data['code'].apply(is_a_stock)].loc[data['new_price'].apply(is_open)]
+            logging.info("stockfetch.fetch_stocks source=%s rows=%s", source_name, len(data.index))
+            return data
+        except Exception as e:
+            logging.warning("stockfetch.fetch_stocks source=%s failed: %s", source_name, e)
     return None
 
 
@@ -407,6 +422,10 @@ def fetch_stock_hist(data_base, date_start=None, is_cache=True):
     try:
         data = stock_hist_cache(code, date_start, None, is_cache, 'qfq')
         if data is not None:
+            # 指标计算会读取 data['code']；历史源本身只返回 OHLCV，统一在
+            # 入口补齐，保证 EastMoney/Tencent 两条链路的下游合同一致。
+            data = data.copy()
+            data['code'] = str(code).zfill(6)
             data.loc[:, 'p_change'] = tl.ROC(data['close'].values, 1)
             data['p_change'].values[np.isnan(data['p_change'].values)] = 0.0
             data["volume"] = data['volume'].values.astype('double') * 100  # 成交量单位从手变成股。
@@ -425,17 +444,27 @@ def stock_hist_cache(code, date_start, date_end=None, is_cache=True, adjust=''):
             os.makedirs(cache_dir)
     except Exception:
         pass
-    cache_file = os.path.join(cache_dir, "%s%s.gzip.pickle" % (code, adjust))
+    market_source = os.getenv("STOCK_MARKET_DATA_SOURCE", "tencent").strip().lower()
+    # 不复用来源不明的旧缓存；否则腾讯恢复后仍可能把东财旧数据当作本轮输入。
+    cache_file = os.path.join(cache_dir, "%s_%s%s.gzip.pickle" % (code, market_source, adjust))
     # 如果缓存存在就直接返回缓存数据。压缩方式。
     try:
         if os.path.isfile(cache_file):
             return pd.read_pickle(cache_file, compression="gzip")
         else:
-            if date_end is not None:
-                stock = she.stock_zh_a_hist(symbol=code, period="daily", start_date=date_start, end_date=date_end,
-                                            adjust=adjust)
+            if market_source == "eastmoney":
+                if date_end is not None:
+                    stock = she.stock_zh_a_hist(symbol=code, period="daily", start_date=date_start, end_date=date_end,
+                                                adjust=adjust)
+                else:
+                    stock = she.stock_zh_a_hist(symbol=code, period="daily", start_date=date_start, adjust=adjust)
             else:
-                stock = she.stock_zh_a_hist(symbol=code, period="daily", start_date=date_start, adjust=adjust)
+                stock = sht.stock_zh_a_hist_tx(
+                    symbol=code,
+                    start_date=date_start,
+                    end_date=date_end or datetime.datetime.now().strftime("%Y%m%d"),
+                    adjust=adjust,
+                )
 
             if stock is None or len(stock.index) == 0:
                 return None

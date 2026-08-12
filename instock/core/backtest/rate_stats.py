@@ -20,7 +20,9 @@ def get_rates(code_name, data, stock_column, threshold=101):
         # 设置返回数组。
         stock_data_list = [start_date, code]
 
-        mask = (data['date'] >= start_date)
+        normalized_dates = pd.to_datetime(data['date'], errors='coerce').dt.date
+        normalized_start_date = pd.to_datetime(start_date, errors='raise').date()
+        mask = (normalized_dates >= normalized_start_date)
         data = data.loc[mask].copy()
         data = data.head(n=threshold)
 
