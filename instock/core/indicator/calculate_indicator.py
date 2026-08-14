@@ -73,12 +73,12 @@ def get_indicators(data, end_date=None, threshold=120, calc_threshold=None):
             data['cr'].values[np.isnan(data['cr'].values)] = 0.0
             data['cr'].values[np.isinf(data['cr'].values)] = 0.0
             data['cr'] = data['cr'].values * 100
-            data.loc[:, 'cr-ma1'] = tl.MA(data['cr'].values, timeperiod=5)
-            data['cr-ma1'].values[np.isnan(data['cr-ma1'].values)] = 0.0
-            data.loc[:, 'cr-ma2'] = tl.MA(data['cr'].values, timeperiod=10)
-            data['cr-ma2'].values[np.isnan(data['cr-ma2'].values)] = 0.0
-            data.loc[:, 'cr-ma3'] = tl.MA(data['cr'].values, timeperiod=20)
-            data['cr-ma3'].values[np.isnan(data['cr-ma3'].values)] = 0.0
+            data.loc[:, 'cr_ma1'] = tl.MA(data['cr'].values, timeperiod=5)
+            data['cr_ma1'].values[np.isnan(data['cr_ma1'].values)] = 0.0
+            data.loc[:, 'cr_ma2'] = tl.MA(data['cr'].values, timeperiod=10)
+            data['cr_ma2'].values[np.isnan(data['cr_ma2'].values)] = 0.0
+            data.loc[:, 'cr_ma3'] = tl.MA(data['cr'].values, timeperiod=20)
+            data['cr_ma3'].values[np.isnan(data['cr_ma3'].values)] = 0.0
 
             # rsi
             data.loc[:, 'rsi'] = tl.RSI(data['close'].values, timeperiod=14)
