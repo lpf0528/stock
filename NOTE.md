@@ -238,31 +238,38 @@ time.sleep(random.uniform(1.5, 2.5))  # 延迟从1-1.5s提高到1.5-2.5s
 
 ---
 
-### 已知残余问题
+### 资金流与板块降级落地
 
-资金流向接口（`fetch_stocks_fund_flow`、`fetch_stocks_sector_fund_flow`）仍会偶发失败，原因是这些接口**并行发起多个** `push2.eastmoney.com` 请求，触发服务器频率限制更快。
+资金流向接口（个股资金流、行业资金流、概念资金流）已全面接入同花顺公开排行榜降级源（默认 `STOCK_FUND_FLOW_SOURCE=ths`，`STOCK_SECTOR_FUND_FLOW_SOURCE=ths`），不再受东财并发限流影响，支持今日、3日、5日、10日榜单合并入库。
 
-**影响范围**：`cn_stock_fund_flow_*` 表当日数据为空。  
-**临时规避**：这些数据属于"锦上添花"项，不影响核心选股、指标和回测功能正常运行。
+---
+
+## 六、 故障排查：基本面选股与策略页面无数据
+
+> 记录时间：2026-08-15  
+> 症状：访问 `http://localhost:9988/instock/data?table_name=cn_stock_spot_buy` 显示空白无数据。
+
+### 原因定位
+1. **数据源字段不齐**：`cn_stock_spot_buy`（基本面选股）的筛选条件为 `pe9 > 0 and pe9 <= 20 and pbnewmrq <= 10 and roe_weight >= 15`。腾讯全市场快照源不提供 `roe_weight`（加权净资产收益率）等财报字段，在 `cn_stock_spot` 表中该列为 NULL，导致旧逻辑单表查询时匹配结果为 0 行，表未被创建。
+2. **调度脱节**：`stock_spot_buy` 原本挂在龙虎榜任务末尾作为副产物，未在每日作业管线 `daily_fetch_pipeline.py` 中作为独立作业编排。
+3. **Web API 空参兼容**：后端 `dataTableHandler.py` 在未传 `date` 参数时未做参数分离，触发 SQL 绑定异常回退为空数组。
+
+### 修复方案
+1. **跨表联合补全**：在 `basic_data_other_daily_job.py` 的 `stock_spot_buy` 中，将 `cn_stock_spot` 行情表与包含完整财务数据的 `cn_stock_selection`（综合选股表）按 `date` + `code` 进行左连接，合并 `roe_weight`、`sale_gpr`、`debt_asset_ratio` 等指标并执行策略筛选。
+2. **入库与每日调度编排**：在 `daily_fetch_pipeline.py` 中注册 `FetchJob("stock-spot-buy", "基本面选股", "cn_stock_spot_buy", ...)`，并加入 `basic_data_other_daily_job.main()` 显式执行。
+3. **Web 处理器适配**：优化 `dataTableHandler.py`，兼容 `date is None` 的查询场景。
 
 ---
 
 ### 快速诊断命令
 
 ```bash
-# 1. 检测 push2.eastmoney.com 是否可直连（不走代理）
-unset HTTPS_PROXY HTTP_PROXY https_proxy http_proxy
-curl -4 -s --noproxy '*' \
-  -H 'Cookie: $(cat instock/config/eastmoney_cookie.txt)' \
-  -H 'Referer: https://quote.eastmoney.com/' \
-  "https://push2.eastmoney.com/api/qt/clist/get?pn=1&pz=3&po=1&np=1&ut=bd1d9ddb04089700cf9c27f6f7426281&fltt=2&invt=2&fid=f12&fs=m%3A0+t%3A6&fields=f2%2Cf12%2Cf14&_=1623833739532" | head -c 200
+# 1. 验证基本面选股数据生成
+python -c "import instock.lib.database as mdb; print(mdb.executeSqlFetch('SELECT COUNT(*), MAX(date) FROM cn_stock_spot_buy'))"
 
-# 2. 检测 push2his.eastmoney.com（历史K线，应始终可用）
-curl -4 -s --noproxy '*' \
-  "https://push2his.eastmoney.com/api/qt/stock/kline/get?fields1=f1,f2,f3,f4,f5,f6&fields2=f51,f52,f53,f54,f55,f56&ut=7eea3edcaed734bea9cbfc24409ed989&klt=101&fqt=1&secid=1.600519&beg=20260101&end=20260808&_=1" | head -c 200
+# 2. 验证 Web API 接口输出
+curl -s "http://localhost:9988/instock/api_data?name=cn_stock_spot_buy&date=2026-08-14" | head -c 200
 
-# 3. 确认当前 Shell 无代理变量
-env | grep -i proxy
+# 3. 运行 K 线形态批量识别 (新浪日线高可用通道)
+python instock/job/klinepattern_data_daily_job.py
 ```
-
-预期正常输出：命令1返回 `{"rc":0,"rt":...` 格式 JSON，命令2同上，命令3无输出。

@@ -70,8 +70,9 @@ stock/
 │   │   └── tablestructure.py      # MySQL 数据库表结构全集定义 (9000+行)
 │   ├── job/                       # 盘后每日计算 Job 作业集
 │   │   ├── execute_daily_job.py   # 每日 Job 调度入口主程序
+│   │   ├── daily_fetch_pipeline.py# 独立抓取项执行与验证管线 (含基本面选股与资金流)
 │   │   ├── init_job.py            # 数据库初始化与建表作业
-│   │   ├── basic_data_*.py        # 基础行情与行情扩展 Job
+│   │   ├── basic_data_*.py        # 基础行情与行情扩展 Job (包含 basic_data_other_daily_job)
 │   │   ├── indicators_data_daily_job.py  # 技术指标计算 Job
 │   │   ├── klinepattern_data_daily_job.py # K线形态匹配 Job
 │   │   ├── selection_data_daily_job.py  # 综合选股 Job
