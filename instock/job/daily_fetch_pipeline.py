@@ -24,6 +24,11 @@ from typing import Callable, Iterable
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_RECEIPT_PATH = PROJECT_ROOT / "runtime" / "job_receipts" / "daily_fetch_latest.json"
 
+# Allow both ``python -m instock.job.daily_fetch_pipeline`` and the documented
+# ``python instock/job/daily_fetch_pipeline.py`` invocation.
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
 
 @dataclass(frozen=True)
 class FetchJob:
@@ -113,13 +118,17 @@ def run_fetches(
     selected_ids: set[str] | None = None,
     initialize: Callable[[], None] | None = None,
     row_counter: Callable[[str, dt.date], int] = count_rows,
+    force: bool = False,
 ) -> dict:
+    from instock.lib.database import TABLE_MIN_ROWS
+
     selected_jobs = [job for job in (list(jobs) if jobs is not None else _jobs()) if selected_ids is None or job.id in selected_ids]
     if selected_ids is not None:
         unknown = selected_ids - {job.id for job in selected_jobs}
         if unknown:
             raise RuntimeError(f"未知抓取项: {', '.join(sorted(unknown))}")
 
+    is_force = force or os.environ.get('STOCK_FORCE_REFETCH', '').strip().lower() in {'1', 'true', 'yes'}
     started_at = dt.datetime.now().astimezone()
     payload: dict = {
         "schema_version": "1.0",
@@ -129,6 +138,7 @@ def run_fetches(
         "finished_at": None,
         "status": "failed",
         "retry_mode": selected_ids is not None,
+        "force_mode": is_force,
         "items": [],
     }
     try:
@@ -139,20 +149,41 @@ def run_fetches(
         for job in selected_jobs:
             item = {"id": job.id, "name": job.name, "table_name": job.table_name, "status": "failed", "attempts": 1,
                     "started_at": dt.datetime.now().astimezone().isoformat(), "finished_at": None, "row_count": 0,
-                    "error": None}
+                    "skipped": False, "error": None}
             try:
+                expected_min = TABLE_MIN_ROWS.get(job.table_name, 1)
+                existing_rows = row_counter(job.table_name, date)
+
+                if not is_force and existing_rows >= expected_min:
+                    import logging
+                    logging.info(f"⏭️ [已存在-跳过] {job.name} ({job.table_name}) 在 {date.isoformat()} 已存在完整数据 ({existing_rows} >= {expected_min} 条)，跳过重复抓取")
+                    item["status"] = "completed"
+                    item["skipped"] = True
+                    item["row_count"] = existing_rows
+                    item["finished_at"] = dt.datetime.now().astimezone().isoformat()
+                    payload["items"].append(item)
+                    continue
+
+                import logging
+                if existing_rows > 0 and existing_rows < expected_min:
+                    logging.warning(f"🔄 [不完整-重抓] {job.name} ({job.table_name}) 在 {date.isoformat()} 仅存在 {existing_rows} 条数据 (低于预期阈值 {expected_min} 条)，重新执行抓取...")
+                else:
+                    logging.info(f"▶️ [开始抓取] {job.name} ({job.table_name}) (日期: {date.isoformat()})...")
+
                 job.runner(date)
                 item["row_count"] = row_counter(job.table_name, date)
-                if item["row_count"] > 0:
+                if item["row_count"] >= expected_min or (expected_min == 1 and item["row_count"] > 0):
                     item["status"] = "completed"
+                    logging.info(f"✅ [抓取成功] {job.name} ({job.table_name}) 已入库 {item['row_count']} 条数据")
                 else:
-                    item["error"] = f"抓取返回后未验收到 {date.isoformat()} 的 {job.table_name} 数据"
+                    item["error"] = f"抓取返回后未达到预期数据行数 ({item['row_count']} < {expected_min})"
             except Exception as exc:
                 item["error"] = str(exc)
                 item["traceback"] = traceback.format_exc(limit=5)
             finally:
-                item["finished_at"] = dt.datetime.now().astimezone().isoformat()
-                payload["items"].append(item)
+                if not item.get("skipped"):
+                    item["finished_at"] = dt.datetime.now().astimezone().isoformat()
+                    payload["items"].append(item)
         # A retry with no failed items is a successful no-op, not a new failure.
         payload["status"] = "completed" if all(item["status"] == "completed" for item in payload["items"]) else "partial_failed"
     except Exception as exc:
@@ -167,6 +198,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="独立执行并验收 stock 每日抓取项")
     parser.add_argument("--date", type=dt.date.fromisoformat, help="交易日 YYYY-MM-DD；默认最近交易日")
     parser.add_argument("--only-failed", action="store_true", help="仅重试同一交易日的上次失败项")
+    parser.add_argument("--force", action="store_true", help="强制重新抓取（即使已存在完整数据）")
     parser.add_argument("--task", action="append", metavar="ID_OR_TABLE", help="仅运行指定抓取项；可重复，接受任务 ID、表名或中文名称")
     parser.add_argument("--receipt", type=Path, default=DEFAULT_RECEIPT_PATH, help="抓取回执路径")
     args = parser.parse_args()
@@ -177,7 +209,7 @@ def main() -> int:
     selected_ids = failed_job_ids(read_receipt(args.receipt), date) if args.only_failed else None
     if args.task:
         selected_ids = resolve_job_ids(args.task, jobs)
-    payload = run_fetches(date=date, receipt_path=args.receipt, jobs=jobs, selected_ids=selected_ids)
+    payload = run_fetches(date=date, receipt_path=args.receipt, jobs=jobs, selected_ids=selected_ids, force=args.force)
     print(f"抓取状态：{payload['status']}；回执：{args.receipt}")
     return 0 if payload["status"] == "completed" else 1
 

@@ -57,6 +57,9 @@ def _page_count(html: str) -> int:
     return int(page_info.get_text(strip=True).split("/")[-1])
 
 
+import random
+import time
+
 def _fetch_raw(indicator: str, timeout: int = 15) -> pd.DataFrame:
     session = _direct_session()
     # Hold one V8 engine for the entire pagination cycle.  THS can invalidate
@@ -70,8 +73,11 @@ def _fetch_raw(indicator: str, timeout: int = 15) -> pd.DataFrame:
         pages = _page_count(first.text)
         frames: list[pd.DataFrame] = []
         for page in range(1, pages + 1):
+            if page > 1:
+                time.sleep(random.uniform(0.4, 0.9))
             response = session.get(_PAGE_URLS[indicator].format(page), headers=headers, timeout=timeout)
             if response.status_code in {401, 403}:
+                time.sleep(random.uniform(1.5, 3.0))
                 headers = _headers(js_code)
                 response = session.get(_PAGE_URLS[indicator].format(page), headers=headers, timeout=timeout)
             response.raise_for_status()

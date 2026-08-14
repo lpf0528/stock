@@ -20,6 +20,7 @@ import instock.core.crawling.stock_hist_em as she
 import instock.core.crawling.stock_zh_a_tx as sht
 import instock.core.crawling.stock_fund_em as sff
 import instock.core.crawling.stock_fund_ths as sft
+import instock.core.crawling.stock_sector_fund_ths as ssft
 import instock.core.crawling.stock_fhps_em as sfe
 import instock.core.crawling.stock_chip_race as scr
 import instock.core.crawling.stock_limitup_reason as slr
@@ -192,20 +193,44 @@ def fetch_stocks_fund_flow(index):
 # 读取板块资金流向
 def fetch_stocks_sector_fund_flow(index_sector, index_indicator):
     sector_name = tbs.CN_STOCK_SECTOR_FUND_FLOW[0][index_sector]
+    cn_flow = tbs.CN_STOCK_SECTOR_FUND_FLOW[1][index_indicator]
     try:
-        cn_flow = tbs.CN_STOCK_SECTOR_FUND_FLOW[1][index_indicator]
+        source = os.environ.get('STOCK_SECTOR_FUND_FLOW_SOURCE', 'ths').strip().lower()
+        if source not in {'ths', 'eastmoney', 'auto'}:
+            raise ValueError("STOCK_SECTOR_FUND_FLOW_SOURCE 仅支持 ths、eastmoney 或 auto")
+
         logging.info(
             f"stockfetch.fetch_stocks_sector_fund_flow开始抓取: sector={sector_name}, "
-            f"indicator={cn_flow['cn']}, index_sector={index_sector}, index_indicator={index_indicator}"
+            f"indicator={cn_flow['cn']}, index_sector={index_sector}, index_indicator={index_indicator}, source={source}"
         )
-        data = sff.stock_sector_fund_flow_rank(indicator=cn_flow['cn'], sector_type=sector_name)
+
+        data = None
+        if source in {'eastmoney', 'auto'}:
+            try:
+                data = sff.stock_sector_fund_flow_rank(indicator=cn_flow['cn'], sector_type=sector_name)
+                if data is not None and len(data.index) > 0:
+                    data.columns = list(cn_flow['columns'])
+            except Exception as exc:
+                if source == 'eastmoney':
+                    raise
+                logging.warning(f"东方财富板块资金流不可用，切换同花顺: {exc}")
+
+        if data is None or len(data.index) == 0:
+            if source == 'eastmoney':
+                return _load_sector_fund_flow_cache(sector_name, cn_flow['cn'])
+            data = ssft.stock_sector_fund_flow_rank_ths(indicator=cn_flow['cn'], sector_type=sector_name)
+            logging.info(
+                f"stockfetch.fetch_stocks_sector_fund_flow数据源=同花顺: sector={sector_name}, "
+                f"indicator={cn_flow['cn']}, rows={len(data.index)}"
+            )
+
         if data is None or len(data.index) == 0:
             logging.warning(
                 f"stockfetch.fetch_stocks_sector_fund_flow返回空数据: sector={sector_name}, "
                 f"indicator={cn_flow['cn']}"
             )
             return _load_sector_fund_flow_cache(sector_name, cn_flow['cn'])
-        data.columns = list(cn_flow['columns'])
+
         logging.info(
             f"stockfetch.fetch_stocks_sector_fund_flow抓取成功: sector={sector_name}, "
             f"indicator={cn_flow['cn']}, rows={len(data.index)}, cols={list(data.columns)}"
@@ -217,7 +242,6 @@ def fetch_stocks_sector_fund_flow(index_sector, index_indicator):
             f"stockfetch.fetch_stocks_sector_fund_flow处理异常: sector={sector_name}, "
             f"index_indicator={index_indicator}, error={e}"
         )
-        cn_flow = tbs.CN_STOCK_SECTOR_FUND_FLOW[1][index_indicator]
         return _load_sector_fund_flow_cache(sector_name, cn_flow['cn'])
 
 
@@ -413,6 +437,15 @@ def fetch_stock_limitup_reason(date):
         if data is None or len(data.index) == 0:
             return None
         data.columns = list(tbs.TABLE_CN_STOCK_LIMITUP_REASON['columns'])
+        requested_date = date.strftime("%Y-%m-%d")
+        returned_dates = data['date'].astype(str).str[:10]
+        if not returned_dates.eq(requested_date).all():
+            logging.warning(
+                "涨停原因上游日期不匹配，拒绝写入: requested=%s returned=%s",
+                requested_date,
+                sorted(returned_dates.dropna().unique().tolist()),
+            )
+            return None
         return data
     except Exception as e:
         logging.error(f"stockfetch.fetch_stock_limitup_reason处理异常：{e}")

@@ -7,6 +7,7 @@ import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from instock.core import stockfetch
 from instock.job import basic_data_other_daily_job as job
 
 
@@ -29,11 +30,14 @@ def test_fund_flow_periods_are_merged_incrementally(monkeypatch) -> None:
 
 def test_fund_flow_fetch_discards_non_six_digit_codes(monkeypatch) -> None:
     columns = list(job.tbs.CN_STOCK_FUND_FLOW[0]["columns"])
-    rows = pd.DataFrame([["600001", "甲", 10, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1], ["83000001", "异常", 10, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1]], columns=columns)
-    monkeypatch.setattr(job.stf, "fetch_stocks_fund_flow", lambda _index: rows)
+    rows = pd.DataFrame({column: [None, None] for column in columns})
+    rows["code"] = ["600001", "83000001"]
+    rows["name"] = ["甲", "异常"]
+    rows["new_price"] = [10, 10]
+    monkeypatch.setenv("STOCK_FUND_FLOW_SOURCE", "ths")
+    monkeypatch.setattr(stockfetch.sft, "stock_individual_fund_flow_rank_ths", lambda **_kwargs: rows)
 
-    result = job.build_stock_fund_flow_data((0,))
+    result = stockfetch.fetch_stocks_fund_flow(0)
 
-    # The filter lives at the fetch boundary; exercise it directly with a
-    # small source substitute to avoid a live THS request.
-    monkeypatch.setattr(job.stf, "fetch_stocks_fund_flow", lambda _index: result)
+    assert result is not None
+    assert result["code"].tolist() == ["600001"]

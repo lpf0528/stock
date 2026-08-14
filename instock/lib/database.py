@@ -244,3 +244,46 @@ def executeSqlCount(sql, params=()):
             except Exception as e:
                 logging.error(f"database.select_count计算数量处理异常：{e}")
     return 0
+
+
+# 各数据表判定为“已完整抓取”的最小预期行数阈值
+TABLE_MIN_ROWS = {
+    'cn_stock_spot': 1000,              # 每日全市场股票行情
+    'cn_stock_selection': 1000,         # 综合选股
+    'cn_stock_fund_flow': 1000,         # 个股资金流
+    'cn_stock_fund_flow_industry': 50,  # 行业资金流
+    'cn_stock_fund_flow_concept': 100,  # 概念资金流
+    'cn_stock_lhb': 1,                  # 龙虎榜
+    'cn_stock_blocktrade': 1,           # 大宗交易
+    'cn_stock_bonus': 1,                # 分红配送
+    'cn_stock_limitup_reason': 1,       # 涨停原因
+    'cn_stock_chip_race_open': 1,       # 早盘抢筹
+    'cn_stock_chip_race_end': 1,        # 尾盘抢筹
+    'cn_etf_spot': 100,                 # ETF行情
+    'cn_stock_indicators': 10,          # 技术指标
+}
+
+
+def is_table_data_completed(table_name, date, min_rows=None):
+    """检查指定表在指定日期是否已经存在完整、成功抓取的数据。"""
+    if not checkTableIsExist(table_name):
+        return False
+    date_str = date.strftime("%Y-%m-%d") if hasattr(date, 'strftime') else str(date)
+    count = executeSqlCount(f"SELECT COUNT(*) FROM `{table_name}` WHERE `date` = %s", (date_str,))
+    if count == 0:
+        return False
+    expected_min = min_rows if min_rows is not None else TABLE_MIN_ROWS.get(table_name, 1)
+    if count < expected_min:
+        logging.warning(f"⚠️ 表 `{table_name}` 在 {date_str} 仅存在 {count} 条数据 (低于预期完整阈值 {expected_min} 条)，需重新抓取")
+        return False
+    return True
+
+
+def should_skip_fetch(table_name, date, min_rows=None, force=False):
+    """判断是否应跳过抓取（已有成功完整数据且未强制重新抓取）。"""
+    if force:
+        return False
+    if os.environ.get('STOCK_FORCE_REFETCH', '').strip().lower() in {'1', 'true', 'yes'}:
+        return False
+    return is_table_data_completed(table_name, date, min_rows)
+
