@@ -301,3 +301,55 @@ python instock/job/klinepattern_data_daily_job.py
    # 验证 Web 接口返回
    curl -s "http://localhost:9988/instock/api_data?name=cn_stock_indicators&date=2026-08-14" | head -c 200
    ```
+
+---
+
+## 八、 故障排查与策略说明：指标买入数据 (cn_stock_indicators_buy)
+
+> 记录时间：2026-08-15  
+> 症状：访问 `http://localhost:9988/instock/data?table_name=cn_stock_indicators_buy` 显示无数据。
+
+### 原因定位
+1. **成交量量纲失真导致 CR 能量指标为 0**：
+   - 新浪财经历史日线接口 `ak.stock_zh_a_daily` 返回的成交量单位为 **股**；
+   - 系统历史合同（`CN_STOCK_HIST_DATA`）规范单位为 **手**，调度层在计算指标前会统一乘以 100 转为股；
+   - 这导致成交量被二次放大了 100 倍，使得计算中间价 `m_price = amount / volume` 变成了真实股价的 1/100；
+   - 进而导致 `m_l = m_price - min(m_price, low)` 恒为 0，全市场所有股票在 `cn_stock_indicators` 表中的 CR 能量指标计算结果全部为 `0.0`。
+2. **指标买入策略的多指标强共振门槛**：
+   - 系统默认的指标买入（`guess_buy`）要求 8 个技术指标在同一天全部达到极端超买与放量共振：
+     - `kdjk >= 80` 且 `kdjd >= 70` 且 `kdjj >= 100`（KDJ 处于高位超买）
+     - `rsi_6 >= 80`（RSI 极强）
+     - `cci >= 100`（CCI 顺势超买破百）
+     - `wr_6 >= -20`（威廉指标处于超买区）
+     - `vr >= 160`（成交量明显放量）
+     - `cr >= 300`（CR 能量指标极高，原先因全市场 CR 为 0 导致 0 股命中）
+
+### 修复方案
+1. **修正新浪日线成交量单位**：
+   在 `instock/core/crawling/stock_zh_a_sina.py` 中增加 `df["volume"] = df["volume"] / 100.0` 规范化为手。
+2. **中间价 CR 计算容错保护**：
+   在 `instock/core/indicator/calculate_indicator.py` 中对停牌或成交量/成交额为 0 的异常增加安全回退。
+3. **重新执行技术指标与买入筛选任务**：
+   ```bash
+   STOCK_HIST_WORKERS=32 python instock/job/indicators_data_daily_job.py
+   ```
+
+### 筛选结果说明与策略自定义
+- **2026-08-14 筛选结果**：
+  - 符合前 7 个条件的强势股全市场共有 18 只（如华西股份、金螳螂、超颖电子、爱丽家居等）；
+  - 但因多数强势股的 CR 在 150~270 之间，全市场仅 **爱丽家居**（`603221`，CR 值为 `304.22`）同时踩中全部 8 项极值条件入库。
+- **自定义调整选股规则**：
+  可在 `instock/job/indicators_data_daily_job.py` 的 `guess_buy(date)` 函数中修改 SQL 逻辑：
+  - **放宽条件**：如将 `cr >= 300` 降为 `cr >= 150`，当日可扩增至 18 只股票；
+  - **定制常用策略**：例如改为经典的 **MACD 低位金叉 + RSI 反弹**：
+    ```sql
+    `macd` > `macds` and `macdh` > 0 and `rsi_6` between 30 and 60 and `kdjk` > `kdjd`
+    ```
+4. **验证命令**：
+   ```bash
+   # 验证指标买入表数据
+   python -c "import instock.lib.database as mdb; print(mdb.executeSqlFetch('SELECT date, code, name FROM cn_stock_indicators_buy'))"
+
+   # 验证 Web API 接口
+   curl -s "http://localhost:9988/instock/api_data?name=cn_stock_indicators_buy&date=2026-08-14"
+   ```

@@ -63,6 +63,9 @@ def stock_zh_a_hist_sina(
             for col in ("open", "close", "high", "low", "volume", "amount"):
                 df[col] = pd.to_numeric(df[col], errors="coerce")
 
+            # 新浪接口返回的成交量单位为股；CN_STOCK_HIST_DATA 与下游合同沿用手（手=100股）。
+            df["volume"] = df["volume"] / 100.0
+
             pre_close = df["close"].shift(1)
             df["amplitude"] = (df["high"] - df["low"]) / pre_close * 100
             df["quote_change"] = df["close"].pct_change() * 100

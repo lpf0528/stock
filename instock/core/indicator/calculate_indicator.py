@@ -63,7 +63,12 @@ def get_indicators(data, end_date=None, threshold=120, calc_threshold=None):
             data['trix_20_sma'].values[np.isnan(data['trix_20_sma'].values)] = 0.0
 
             # cr
-            data.loc[:, 'm_price'] = data['amount'].values / data['volume'].values
+            raw_m_price = np.where((data['volume'].values > 0) & (data['amount'].values > 0),
+                                   data['amount'].values / data['volume'].values,
+                                   (data['high'].values + data['low'].values) / 2.0)
+            data.loc[:, 'm_price'] = np.where(np.isnan(raw_m_price) | np.isinf(raw_m_price),
+                                              (data['high'].values + data['low'].values) / 2.0,
+                                              raw_m_price)
             data.loc[:, 'm_price_sf1'] = data['m_price'].shift(1, fill_value=0.0).values
             data.loc[:, 'h_m'] = data['high'].values - data[['m_price_sf1', 'high']].values.min(axis=1)
             data.loc[:, 'm_l'] = data['m_price_sf1'].values - data[['m_price_sf1', 'low']].values.min(axis=1)
