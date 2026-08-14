@@ -44,7 +44,7 @@
 | 数据表 / 功能 | 当前状态 | 原因与说明 |
 | --- | --- | --- |
 | `cn_stock_attention` | 0 行 | 自选股功能没有用户数据，但表结构正常；添加关注后即可使用。 |
-| 指标卖出 `cn_stock_indicators_sell` | 表不存在 / 0 行 | 正常筛选结果。当日全市场 0 股命中指标卖出条件（KDJ超卖、RSI超卖、CR<40等极度超卖组合）。 |
+| 指标卖出 `cn_stock_indicators_sell` | 表不存在 / 0 行 | 正常筛选结果。当日全市场 0 股命中指标卖出条件（KDJ超卖、RSI超卖、CR<40等极度超卖组合，详见 [`docs/indicators_sell_status_analysis.md`](indicators_sell_status_analysis.md)）。 |
 | 无大幅回撤 `cn_stock_strategy_low_backtrace_increase` | 表不存在 / 0 行 | 正常筛选结果。策略要求近 60 日涨幅 $\ge 60\%$ 且期间无单日跌幅超 7% 或两日累计跌超 10%。当前交易日全市场 0 股命中，Job 不写入空记录，Web 端安全返回 `[]`。 |
 | 高而窄旗形 `cn_stock_strategy_high_tight_flag` | 表不存在 / 0 行 | 正常筛选结果。策略要求短期暴涨 90% 且在高位紧凑整理，当前交易日全市场 0 股命中。 |
 | 低ATR成长 `cn_stock_strategy_low_atr` | 表不存在 / 0 行 | 正常筛选结果。策略要求上市满 250 日且 ATR 指标处于极低位盘整，当前交易日全市场 0 股命中。 |
