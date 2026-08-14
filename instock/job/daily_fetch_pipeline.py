@@ -49,6 +49,7 @@ def _jobs() -> list[FetchJob]:
     return [
         FetchJob("stock-spot", "股票行情", "cn_stock_spot", lambda date: basic.save_nph_stock_spot_data(date, False)),
         FetchJob("stock-selection", "综合选股", "cn_stock_selection", lambda date: selection.save_nph_stock_selection_data(date, False)),
+        FetchJob("stock-spot-buy", "基本面选股", "cn_stock_spot_buy", lambda date: other.stock_spot_buy(date, False)),
         FetchJob("stock-lhb", "龙虎榜", "cn_stock_lhb", lambda date: other.save_nph_stock_lhb_data(date, False)),
         FetchJob("stock-fund-flow", "个股资金流", "cn_stock_fund_flow", lambda date: other.save_nph_stock_fund_flow_data(date, False)),
         FetchJob("industry-fund-flow", "行业资金流", "cn_stock_fund_flow_industry", lambda date: other.stock_sector_fund_flow_data(date, 0)),

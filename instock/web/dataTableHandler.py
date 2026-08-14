@@ -85,7 +85,10 @@ class GetStockDataHandler(webBase.BaseHandler, ABC):
 
         sql = f" SELECT *{order_columns} FROM `{web_module_data.table_name}`{where}{order_by}"
         try:
-            data = self.db.query(sql, date)
+            if date is None:
+                data = self.db.query(sql)
+            else:
+                data = self.db.query(sql, date)
         except Exception:
             # 表可能在检查后被删除，或数据库状态和缓存不一致
             self.write(json.dumps([], cls=MyEncoder))

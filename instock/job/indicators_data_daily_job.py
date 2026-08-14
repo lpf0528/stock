@@ -60,6 +60,7 @@ def prepare(date):
         if date.strftime("%Y-%m-%d") != data.iloc[0]['date']:
             data['date'] = date_str
         mdb.insert_db_from_df(data, table_name, cols_type, False, "`date`,`code`")
+        logging.info(f"💾 [技术指标入库成功] {date_str} 成功计算并写入 {len(data)} 条指标数据至 `{table_name}` 表")
 
     except Exception as e:
         logging.error(f"indicators_data_daily_job.prepare处理异常：{e}")
@@ -71,17 +72,28 @@ def run_check(stocks, date=None, workers=40):
     columns.insert(0, 'code')
     columns.insert(0, 'date')
     data_column = columns
+    total_stocks = len(stocks)
+    logging.info(f"🔍 [技术指标计算] 开始计算 {total_stocks} 只股票的技术指标 (并发线程数: {workers})...")
+    step_interval = max(50, total_stocks // 20)
+    processed_count = 0
     try:
         with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as executor:
             future_to_data = {executor.submit(idr.get_indicator, k, stocks[k], data_column, date=date): k for k in stocks}
             for future in concurrent.futures.as_completed(future_to_data):
                 stock = future_to_data[future]
+                processed_count += 1
                 try:
                     _data_ = future.result()
                     if _data_ is not None:
                         data[stock] = _data_
                 except Exception as e:
                     logging.error(f"indicators_data_daily_job.run_check处理异常：{stock[1]}代码{e}")
+
+                if processed_count % step_interval == 0 or processed_count == total_stocks:
+                    pct = (processed_count / total_stocks) * 100
+                    logging.info(f"⏳ [指标计算进度] {processed_count}/{total_stocks} ({pct:.1f}%) - 已完成 {len(data)} 只股票指标计算")
+
+        logging.info(f"✅ [技术指标计算完成] 共完成 {len(data)} 只股票的技术指标计算")
     except Exception as e:
         logging.error(f"indicators_data_daily_job.run_check处理异常：{e}")
     if not data:

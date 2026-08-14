@@ -12,7 +12,10 @@ import requests
 import instock.core.tablestructure as tbs
 
 
-_QUOTE_HEADERS = {"User-Agent": "Mozilla/5.0", "Referer": "https://gu.qq.com/"}
+_QUOTE_HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    "Referer": "https://gu.qq.com/",
+}
 _KLINE_URL = "https://web.ifzq.gtimg.cn/appstock/app/fqkline/get"
 _SPOT_URL = "https://proxy.finance.qq.com/cgi/cgi-bin/rank/hs/getBoardRankList"
 
@@ -33,9 +36,7 @@ def _as_number(series: pd.Series, multiplier: float = 1.0) -> pd.Series:
 
 
 def _direct_session() -> requests.Session:
-    """Do not inherit a local Clash/system proxy for Tencent public endpoints."""
     session = requests.Session()
-    session.trust_env = False
     session.headers.update(_QUOTE_HEADERS)
     return session
 

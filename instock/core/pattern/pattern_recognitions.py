@@ -2,6 +2,7 @@
 # -*- coding: utf-8 -*-
 
 import logging
+import pandas as pd
 
 __author__ = 'myh '
 __date__ = '2023/3/24 '
@@ -10,7 +11,9 @@ __date__ = '2023/3/24 '
 def get_pattern_recognitions(data, stock_column, end_date=None, threshold=120, calc_threshold=None):
     isCopy = False
     if end_date is not None:
-        mask = (data['date'] <= end_date)
+        normalized_dates = pd.to_datetime(data['date'], errors='coerce').dt.date
+        normalized_end_date = pd.to_datetime(end_date, errors='raise').date()
+        mask = (normalized_dates <= normalized_end_date)
         data = data.loc[mask]
         isCopy = True
     if calc_threshold is not None:
@@ -61,8 +64,9 @@ def get_pattern_recognition(code_name, data, stock_column, date=None, calc_thres
                 break
 
         if isHas:
+            selected_cols = ['code'] + [k for k in stock_column]
             stockStat.loc[:, 'code'] = code
-            return stockStat.iloc[0, -(len(stock_column) + 1):]
+            return stockStat.iloc[0][selected_cols]
 
     except Exception as e:
         logging.error(f"pattern_recognitions.get_pattern_recognition处理异常：{code}代码{e}")

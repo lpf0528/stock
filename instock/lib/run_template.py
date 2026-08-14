@@ -17,16 +17,21 @@ import os
 
 def setup_logging():
     logger = logging.getLogger()
-    if not logger.handlers:
-        logger.setLevel(logging.INFO)
-        formatter = logging.Formatter('%(asctime)s [%(levelname)s] %(message)s')
-        cpath_current = os.path.dirname(os.path.dirname(__file__))
-        log_path = os.path.join(cpath_current, 'log')
-        if not os.path.exists(log_path):
-            os.makedirs(log_path)
+    logger.setLevel(logging.INFO)
+    formatter = logging.Formatter('%(asctime)s [%(levelname)s] %(message)s')
+    cpath_current = os.path.dirname(os.path.dirname(__file__))
+    log_path = os.path.join(cpath_current, 'log')
+    if not os.path.exists(log_path):
+        os.makedirs(log_path)
+
+    has_stream = any(isinstance(h, logging.StreamHandler) and not isinstance(h, logging.FileHandler) for h in logger.handlers)
+    has_file = any(isinstance(h, logging.FileHandler) for h in logger.handlers)
+
+    if not has_file:
         fh = logging.FileHandler(os.path.join(log_path, 'stock_execute_job.log'), encoding='utf-8')
         fh.setFormatter(formatter)
         logger.addHandler(fh)
+    if not has_stream:
         sh = logging.StreamHandler(sys.stdout)
         sh.setFormatter(formatter)
         logger.addHandler(sh)

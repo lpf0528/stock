@@ -48,7 +48,7 @@ def save_nph_stock_lhb_data(date, before=True):
         mdb.insert_db_from_df(data, table_name, cols_type, False, "`date`,`code`")
     except Exception as e:
         logging.error(f"basic_data_other_daily_job.save_stock_lhb_data处理异常：{e}")
-    stock_spot_buy(date)
+
 
 # 每日股票龙虎榜(新浪)
 def save_nph_stock_top_data(date, before=True):
@@ -71,7 +71,6 @@ def save_nph_stock_top_data(date, before=True):
         mdb.insert_db_from_df(data, table_name, cols_type, False, "`date`,`code`")
     except Exception as e:
         logging.error(f"basic_data_other_daily_job.save_stock_top_data处理异常：{e}")
-    stock_spot_buy(date)
 
 
 # 每日股票资金流向
@@ -282,14 +281,91 @@ def save_nph_stock_bonus(date, before=True):
 
 
 # 基本面选股
-def stock_spot_buy(date):
+def stock_spot_buy(date, before=True):
+    if before:
+        return
     try:
-        _table_name = tbs.TABLE_CN_STOCK_SPOT['name']
-        if not mdb.checkTableIsExist(_table_name):
+        spot_table = tbs.TABLE_CN_STOCK_SPOT['name']
+        selection_table = tbs.TABLE_CN_STOCK_SELECTION['name']
+        has_spot = mdb.checkTableIsExist(spot_table)
+        has_selection = mdb.checkTableIsExist(selection_table)
+
+        if not has_spot and not has_selection:
             return
 
-        sql = f'''SELECT * FROM `{_table_name}` WHERE `date` = '{date}' and 
-                `pe9` > 0 and `pe9` <= 20 and `pbnewmrq` <= 10 and `roe_weight` >= 15'''
+        date_str = date.strftime("%Y-%m-%d") if hasattr(date, "strftime") else str(date)
+
+        if has_spot and has_selection:
+            sql = f"""
+            SELECT 
+                s.date,
+                s.code,
+                s.name,
+                s.new_price,
+                s.change_rate,
+                s.ups_downs,
+                s.volume,
+                s.deal_amount,
+                s.amplitude,
+                s.turnoverrate,
+                s.volume_ratio,
+                s.open_price,
+                s.high_price,
+                s.low_price,
+                s.pre_close_price,
+                s.speed_increase,
+                s.speed_increase_5,
+                s.speed_increase_60,
+                s.speed_increase_all,
+                COALESCE(s.dtsyl, sel.dtsyl) AS dtsyl,
+                COALESCE(s.pe9, sel.pe9) AS pe9,
+                s.pe,
+                COALESCE(s.pbnewmrq, sel.pbnewmrq) AS pbnewmrq,
+                COALESCE(s.basic_eps, sel.basic_eps) AS basic_eps,
+                COALESCE(s.bvps, sel.bvps) AS bvps,
+                COALESCE(s.per_capital_reserve, sel.per_capital_reserve) AS per_capital_reserve,
+                COALESCE(s.per_unassign_profit, sel.per_unassign_profit) AS per_unassign_profit,
+                COALESCE(s.roe_weight, sel.roe_weight) AS roe_weight,
+                COALESCE(s.sale_gpr, sel.sale_gpr) AS sale_gpr,
+                COALESCE(s.debt_asset_ratio, sel.debt_asset_ratio) AS debt_asset_ratio,
+                COALESCE(s.total_operate_income, sel.total_operate_income) AS total_operate_income,
+                COALESCE(s.toi_yoy_ratio, sel.toi_yoy_ratio) AS toi_yoy_ratio,
+                COALESCE(s.parent_netprofit, sel.parent_netprofit) AS parent_netprofit,
+                COALESCE(s.netprofit_yoy_ratio, sel.netprofit_yoy_ratio) AS netprofit_yoy_ratio,
+                s.report_date,
+                COALESCE(s.total_shares, sel.total_shares) AS total_shares,
+                COALESCE(s.free_shares, sel.free_shares) AS free_shares,
+                COALESCE(s.total_market_cap, sel.total_market_cap) AS total_market_cap,
+                COALESCE(s.free_cap, sel.free_cap) AS free_cap,
+                COALESCE(s.industry, sel.industry) AS industry,
+                COALESCE(s.listing_date, sel.listing_date) AS listing_date
+            FROM `{spot_table}` s
+            LEFT JOIN `{selection_table}` sel ON s.code = sel.code AND s.date = sel.date
+            WHERE s.date = '{date_str}'
+              AND COALESCE(s.pe9, sel.pe9) > 0 
+              AND COALESCE(s.pe9, sel.pe9) <= 20 
+              AND COALESCE(s.pbnewmrq, sel.pbnewmrq) <= 10 
+              AND COALESCE(s.roe_weight, sel.roe_weight) >= 15
+            """
+        elif has_selection:
+            sql = f"""
+            SELECT 
+                date, code, name, new_price, change_rate, 
+                NULL AS ups_downs, volume, deal_amount, amplitude, turnoverrate, volume_ratio,
+                NULL AS open_price, high_price, low_price, pre_close_price,
+                NULL AS speed_increase, NULL AS speed_increase_5, NULL AS speed_increase_60, NULL AS speed_increase_all,
+                dtsyl, pe9, NULL AS pe, pbnewmrq, basic_eps, bvps, per_capital_reserve, per_unassign_profit,
+                roe_weight, sale_gpr, debt_asset_ratio, total_operate_income, toi_yoy_ratio, parent_netprofit,
+                netprofit_yoy_ratio, NULL AS report_date, total_shares, free_shares, total_market_cap, free_cap,
+                industry, listing_date
+            FROM `{selection_table}`
+            WHERE `date` = '{date_str}'
+              AND `pe9` > 0 AND `pe9` <= 20 AND `pbnewmrq` <= 10 AND `roe_weight` >= 15
+            """
+        else:
+            sql = f"""SELECT * FROM `{spot_table}` WHERE `date` = '{date_str}' and 
+                    `pe9` > 0 and `pe9` <= 20 and `pbnewmrq` <= 10 and `roe_weight` >= 15"""
+
         data = pd.read_sql(sql=sql, con=mdb.engine())
         data = data.drop_duplicates(subset="code", keep="last")
         if len(data.index) == 0:
@@ -298,13 +374,14 @@ def stock_spot_buy(date):
         table_name = tbs.TABLE_CN_STOCK_SPOT_BUY['name']
         # 删除老数据。
         if mdb.checkTableIsExist(table_name):
-            del_sql = f"DELETE FROM `{table_name}` where `date` = '{date}'"
+            del_sql = f"DELETE FROM `{table_name}` where `date` = '{date_str}'"
             mdb.executeSql(del_sql)
             cols_type = None
         else:
             cols_type = tbs.get_field_types(tbs.TABLE_CN_STOCK_SPOT_BUY['columns'])
 
         mdb.insert_db_from_df(data, table_name, cols_type, False, "`date`,`code`")
+        logging.info(f"✅ [基本面选股] 成功写入 {len(data)} 条数据到 `{table_name}` (日期: {date_str})")
     except Exception as e:
         logging.error(f"basic_data_other_daily_job.stock_spot_buy处理异常：{e}")
 
@@ -357,6 +434,7 @@ def main():
     runt.run_with_args(save_nph_stock_sector_fund_flow_data)
     runt.run_with_args(stock_chip_race_open_data)
     runt.run_with_args(stock_imitup_reason_data)
+    runt.run_with_args(stock_spot_buy)
 
 
 # main函数入口

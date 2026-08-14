@@ -18,6 +18,7 @@ import instock.core.crawling.stock_lhb_sina as sls
 import instock.core.crawling.stock_dzjy_em as sde
 import instock.core.crawling.stock_hist_em as she
 import instock.core.crawling.stock_zh_a_tx as sht
+import instock.core.crawling.stock_zh_a_sina as shs
 import instock.core.crawling.stock_fund_em as sff
 import instock.core.crawling.stock_fund_ths as sft
 import instock.core.crawling.stock_sector_fund_ths as ssft
@@ -512,39 +513,66 @@ def stock_hist_cache(code, date_start, date_end=None, is_cache=True, adjust=''):
             os.makedirs(cache_dir)
     except Exception:
         pass
-    market_source = os.getenv("STOCK_MARKET_DATA_SOURCE", "tencent").strip().lower()
-    # 不复用来源不明的旧缓存；否则腾讯恢复后仍可能把东财旧数据当作本轮输入。
+    market_source = os.getenv("STOCK_MARKET_DATA_SOURCE", "sina").strip().lower()
+    # 不复用来源不明的旧缓存；否则恢复后仍可能把旧数据当作本轮输入。
     cache_file = os.path.join(cache_dir, "%s_%s%s.gzip.pickle" % (code, market_source, adjust))
     # 如果缓存存在就直接返回缓存数据。压缩方式。
     try:
         if os.path.isfile(cache_file):
-            return pd.read_pickle(cache_file, compression="gzip")
-        else:
-            if market_source == "eastmoney":
+            try:
+                return pd.read_pickle(cache_file, compression="gzip")
+            except Exception:
+                try:
+                    os.remove(cache_file)
+                except Exception:
+                    pass
+
+        stock = None
+        if market_source == "eastmoney":
+            try:
                 if date_end is not None:
                     stock = she.stock_zh_a_hist(symbol=code, period="daily", start_date=date_start, end_date=date_end,
                                                 adjust=adjust)
                 else:
                     stock = she.stock_zh_a_hist(symbol=code, period="daily", start_date=date_start, adjust=adjust)
-            else:
+            except Exception:
+                stock = None
+        elif market_source == "tencent":
+            try:
                 stock = sht.stock_zh_a_hist_tx(
                     symbol=code,
                     start_date=date_start,
                     end_date=date_end or datetime.datetime.now().strftime("%Y%m%d"),
                     adjust=adjust,
                 )
-
-            if stock is None or len(stock.index) == 0:
-                return None
-            stock.columns = tuple(tbs.CN_STOCK_HIST_DATA['columns'])
-            stock = stock.sort_index()  # 将数据按照日期排序下。
-            try:
-                if is_cache:
-                    stock.to_pickle(cache_file, compression="gzip")
             except Exception:
-                pass
-            # time.sleep(1)
-            return stock
+                stock = None
+
+        # 若指定源（或默认源）获取失败，降级使用新浪财经源获取日线
+        if stock is None or len(stock.index) == 0:
+            try:
+                stock = shs.stock_zh_a_hist_sina(
+                    symbol=code,
+                    start_date=date_start,
+                    end_date=date_end or datetime.datetime.now().strftime("%Y%m%d"),
+                    adjust=adjust,
+                )
+            except Exception:
+                stock = None
+
+        if stock is None or len(stock.index) == 0:
+            return None
+        stock.columns = tuple(tbs.CN_STOCK_HIST_DATA['columns'])
+        stock = stock.sort_index()  # 将数据按照日期排序下。
+        try:
+            if is_cache:
+                tmp_cache_file = cache_file + ".tmp"
+                stock.to_pickle(tmp_cache_file, compression="gzip")
+                os.replace(tmp_cache_file, cache_file)
+        except Exception:
+            pass
+        # time.sleep(1)
+        return stock
     except Exception as e:
         logging.error(f"stockfetch.stock_hist_cache处理异常：{code}代码{e}")
     return None

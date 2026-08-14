@@ -76,6 +76,10 @@ class stock_hist_data(metaclass=singleton_type):
             return
         date_start, is_cache = trd.get_trade_hist_interval(stocks[0][0])  # 提高运行效率，只运行一次
         _data = {}
+        total_stocks = len(stocks)
+        logging.info(f"⏳ [历史行情准备] 开始加载 {total_stocks} 只股票的历史日线数据 (并发度: {workers})...")
+        step_interval = max(50, total_stocks // 20)
+        processed_count = 0
         try:
             # max_workers是None还是没有给出，将默认为机器cup个数*5
             with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as executor:
@@ -83,12 +87,19 @@ class stock_hist_data(metaclass=singleton_type):
                                    in stocks}
                 for future in concurrent.futures.as_completed(future_to_stock):
                     stock = future_to_stock[future]
+                    processed_count += 1
                     try:
                         __data = future.result()
                         if __data is not None:
                             _data[stock] = __data
                     except Exception as e:
                         logging.error(f"singleton.stock_hist_data处理异常：{stock[1]}代码{e}")
+
+                    if processed_count % step_interval == 0 or processed_count == total_stocks:
+                        pct = (processed_count / total_stocks) * 100
+                        logging.info(f"⏳ [历史行情拉取进度] {processed_count}/{total_stocks} ({pct:.1f}%) - 已成功加载 {len(_data)} 只股票日线")
+
+            logging.info(f"✅ [历史行情准备完成] 共扫描 {total_stocks} 只股票，成功加载 {len(_data)} 只有效日线数据")
         except Exception as e:
             logging.error(f"singleton.stock_hist_data处理异常：{e}")
         if not _data:
