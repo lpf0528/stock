@@ -273,3 +273,31 @@ curl -s "http://localhost:9988/instock/api_data?name=cn_stock_spot_buy&date=2026
 # 3. 运行 K 线形态批量识别 (新浪日线高可用通道)
 python instock/job/klinepattern_data_daily_job.py
 ```
+
+---
+
+## 七、 故障排查：股票技术指标页面无数据 (cn_stock_indicators)
+
+> 记录时间：2026-08-15  
+> 症状：访问 `http://localhost:9988/instock/data?table_name=cn_stock_indicators` 显示无数据。
+
+### 原因定位
+1. **未执行指标计算 Job**：`cn_stock_indicators` 依赖历史日线计算 30+ 种技术指标（MACD, KDJ, RSI, BOLL, CCI, ATR 等）。数据库中未执行全量指标作业，缺乏最新交易日数据。
+2. **Web 视图日期回退局限**：`dataTableHandler.py` 中“若当日无数据自动回退至历史最新日期”的保护逻辑原先仅对 `is_realtime=True` 生效，对非实时日频表未生效，导致前端默认请求最新日期为空。
+
+### 修复方案
+1. **执行指标全量计算**：
+   ```bash
+   STOCK_HIST_WORKERS=30 python instock/job/indicators_data_daily_job.py
+   ```
+   通过并发日线拉取与 TA-Lib 计算，成功写入全市场（3,193 支个股）全量技术指标。
+2. **优化 Web 日期回退机制**：
+   在 `instock/web/dataTableHandler.py` 中优化判断逻辑，使所有数据表（包括技术指标、选股策略、K线形态等）在当前交易日数据尚未生成时，均能平滑回退至数据库内最新的有效交易日展示。
+3. **验证命令**：
+   ```bash
+   # 验证指标数据行数与最新日期
+   python -c "import instock.lib.database as mdb; print(mdb.executeSqlFetch('SELECT COUNT(*), MAX(date) FROM cn_stock_indicators'))"
+   
+   # 验证 Web 接口返回
+   curl -s "http://localhost:9988/instock/api_data?name=cn_stock_indicators&date=2026-08-14" | head -c 200
+   ```
