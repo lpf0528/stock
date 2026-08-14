@@ -1,9 +1,10 @@
 #!/usr/local/bin/python
 # -*- coding: utf-8 -*-
 
+import pandas as pd
 import numpy as np
 import talib as tl
-from datetime import datetime, timedelta
+from datetime import timedelta
 
 __author__ = 'myh '
 __date__ = '2023/3/10 '
@@ -18,10 +19,12 @@ def check(code_name, data, date=None, threshold=60):
     if date is None:
         end_date = code_name[0]
     else:
-        end_date = date.strftime("%Y-%m-%d")
+        end_date = date
 
     if end_date is not None:
-        mask = (data['date'] <= end_date)
+        normalized_dates = pd.to_datetime(data['date'], errors='coerce').dt.date
+        normalized_end_date = pd.to_datetime(end_date, errors='raise').date()
+        mask = (normalized_dates <= normalized_end_date)
         data = data.loc[mask].copy()
     if len(data.index) < 250:
         return False
@@ -32,28 +35,30 @@ def check(code_name, data, date=None, threshold=60):
     data = data.tail(n=threshold)
 
     # 区间最低点
-    lowest_row = [1000000, 0, '']
+    lowest_row = [1000000, 0, None]
     # 区间最高点
-    highest_row = [0, 0, '']
+    highest_row = [0, 0, None]
     # 近期低点
-    recent_lowest_row = [1000000, 0, '']
+    recent_lowest_row = [1000000, 0, None]
 
     # 计算区间最高、最低价格
     for _close, _volume, _date in zip(data['close'].values, data['volume'].values, data['date'].values):
+        _cur_date = pd.to_datetime(_date, errors='coerce').date()
         if _close > highest_row[0]:
             highest_row[0] = _close
             highest_row[1] = _volume
-            highest_row[2] = _date
+            highest_row[2] = _cur_date
         elif _close < lowest_row[0]:
             lowest_row[0] = _close
             lowest_row[1] = _volume
-            lowest_row[2] = _date
+            lowest_row[2] = _cur_date
 
-    if lowest_row[1] == 0 or highest_row[1] == 0:
+    if lowest_row[1] == 0 or highest_row[1] == 0 or highest_row[2] is None:
         return False
 
-    data_front = data.loc[(data['date'] < highest_row[2])]
-    data_end = data.loc[(data['date'] >= highest_row[2])]
+    normalized_dates = pd.to_datetime(data['date'], errors='coerce').dt.date
+    data_front = data.loc[normalized_dates < highest_row[2]]
+    data_end = data.loc[normalized_dates >= highest_row[2]]
 
     if data_front.empty:
         return False
@@ -70,10 +75,12 @@ def check(code_name, data, date=None, threshold=60):
             if _close < recent_lowest_row[0]:
                 recent_lowest_row[0] = _close
                 recent_lowest_row[1] = _volume
-                recent_lowest_row[2] = _date
+                recent_lowest_row[2] = pd.to_datetime(_date, errors='coerce').date()
 
-    date_diff = datetime.date(datetime.strptime(recent_lowest_row[2], '%Y-%m-%d')) - \
-                datetime.date(datetime.strptime(highest_row[2], '%Y-%m-%d'))
+    if recent_lowest_row[2] is None or highest_row[2] is None:
+        return False
+
+    date_diff = recent_lowest_row[2] - highest_row[2]
 
     if not (timedelta(days=10) <= date_diff <= timedelta(days=50)):
         return False

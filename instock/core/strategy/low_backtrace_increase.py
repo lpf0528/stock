@@ -2,6 +2,8 @@
 # -*- coding: utf-8 -*-
 
 
+import pandas as pd
+
 __author__ = 'myh '
 __date__ = '2023/3/10 '
 
@@ -13,10 +15,12 @@ def check(code_name, data, date=None, threshold=60):
     if date is None:
         end_date = code_name[0]
     else:
-        end_date = date.strftime("%Y-%m-%d")
+        end_date = date
     if end_date is not None:
-        mask = (data['date'] <= end_date)
-        data = data.loc[mask]
+        normalized_dates = pd.to_datetime(data['date'], errors='coerce').dt.date
+        normalized_end_date = pd.to_datetime(end_date, errors='raise').date()
+        mask = (normalized_dates <= normalized_end_date)
+        data = data.loc[mask].copy()
     if len(data.index) < threshold:
         return False
 

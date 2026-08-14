@@ -1,6 +1,7 @@
 #!/usr/local/bin/python
 # -*- coding: utf-8 -*-
 
+import pandas as pd
 from datetime import datetime
 from instock.core.strategy import turtle_trade
 
@@ -17,29 +18,36 @@ def check(code_name, data, date=None, threshold=15):
     if date is None:
         end_date = code_name[0]
     else:
-        end_date = date.strftime("%Y-%m-%d")
+        end_date = date
     if end_date is not None:
-        mask = (data['date'] <= end_date)
-        data = data.loc[mask]
+        normalized_dates = pd.to_datetime(data['date'], errors='coerce').dt.date
+        normalized_end_date = pd.to_datetime(end_date, errors='raise').date()
+        mask = (normalized_dates <= normalized_end_date)
+        data = data.loc[mask].copy()
     if len(data.index) < threshold:
         return False
 
     data = data.tail(n=threshold)
 
-    limitup_row = [1000000, '']
+    limitup_row = [1000000, None]
     # 找出涨停日
     for _close, _p_change, _date in zip(data['close'].values, data['p_change'].values, data['date'].values):
         if _p_change > 9.5:
-            if turtle_trade.check_enter(code_name, origin_data, date=datetime.date(datetime.strptime(_date, '%Y-%m-%d')), threshold=threshold):
+            check_date = pd.to_datetime(_date, errors='coerce').date()
+            if turtle_trade.check_enter(code_name, origin_data, date=check_date, threshold=threshold):
                 limitup_row[0] = _close
-                limitup_row[1] = _date
+                limitup_row[1] = check_date
                 if check_internal(data, limitup_row):
                     return True
     return False
 
 def check_internal(data, limitup_row):
     limitup_price = limitup_row[0]
-    limitup_end = data.loc[(data['date'] > limitup_row[1])]
+    limitup_date = limitup_row[1]
+    if limitup_date is None:
+        return False
+    normalized_dates = pd.to_datetime(data['date'], errors='coerce').dt.date
+    limitup_end = data.loc[normalized_dates > limitup_date]
     limitup_end = limitup_end.head(n=3)
     if len(limitup_end.index) < 3:
         return False
